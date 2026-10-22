@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Design tokens. Warm neutral surfaces with a deep teal brand colour and a
+ * safety-amber accent for attention states. Dark theme swaps the same tokens.
+ */
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --surface-2: #f1efea;
+  --surface-3: #e8e5de;
+  --border: #dedad1;
+  --border-strong: #c9c4b8;
+  --text: #1f2421;
+  --text-2: #4f5752;
+  --text-3: #7a817c;
+  --brand: #0f5e5a;
+  --brand-hover: #0b4b48;
+  --brand-soft: #e2efed;
+  --brand-text: #ffffff;
+  --accent: #c76b0a;
+  --accent-soft: #fbefdf;
+  --success: #1d7a3e;
+  --success-soft: #e3f3e8;
+  --warning: #9a5b00;
+  --warning-soft: #fdf1d8;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --info: #1c5d99;
+  --info-soft: #e5eff9;
+  --focus: #1c7c76;
+  --sidebar: #17302e;
+  --sidebar-text: #c9d6d3;
+  --sidebar-muted: #86a19c;
+  --sidebar-active: #234643;
+  --shadow: 0 1px 2px rgb(31 36 33 / 0.06), 0 1px 3px rgb(31 36 33 / 0.08);
+  --shadow-lg: 0 10px 30px rgb(31 36 33 / 0.18);
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #121615;
+  --surface: #1a201e;
+  --surface-2: #212826;
+  --surface-3: #2a3230;
+  --border: #303a37;
+  --border-strong: #42504c;
+  --text: #e8ecea;
+  --text-2: #b4bdb9;
+  --text-3: #85908b;
+  --brand: #3fa59d;
+  --brand-hover: #56b8b0;
+  --brand-soft: #1d3634;
+  --brand-text: #0c1514;
+  --accent: #f0a04b;
+  --accent-soft: #3a2a17;
+  --success: #5cc183;
+  --success-soft: #17301f;
+  --warning: #f1b84b;
+  --warning-soft: #3a2d12;
+  --danger: #f2766b;
+  --danger-soft: #3d1a17;
+  --info: #79b1e8;
+  --info-soft: #172a3d;
+  --focus: #56b8b0;
+  --sidebar: #0e1312;
+  --sidebar-text: #b8c6c2;
+  --sidebar-muted: #6f817c;
+  --sidebar-active: #1e2c2a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-text: var(--brand-text);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-active: var(--sidebar-active);
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere; mouse clicks do not show the ring. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

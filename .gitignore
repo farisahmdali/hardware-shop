@@ -1,0 +1,12 @@
+node_modules/
+out/
+dist/
+release/
+coverage/
+test-results/
+playwright-report/
+.tmp/
+*.log
+*.db
+*.db-wal
+*.db-shm
