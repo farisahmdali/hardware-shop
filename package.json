@@ -17,7 +17,7 @@
     "test:watch": "node scripts/run-vitest.mjs",
     "test:e2e": "npm run build && playwright test",
     "dist": "npm run build && electron-builder --win nsis",
-    "dist:mac": "npm run build && electron-builder --mac dmg"
+    "dist:mac": "npm run build && electron-builder --mac dmg --publish never"
   },
   "build": {
     "appId": "com.hardwareshop.manager",
