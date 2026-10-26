@@ -155,7 +155,7 @@ export function NewRentalPage() {
         saleLines: saleLines.map((l) => ({ productId: l.product.id, qty: l.qty, discount: null, expectedUnitPrice: l.product.sellingPrice })),
         expectedSaleTotal: saleLines.length ? sale.grandTotal : 0,
       });
-      await qc.invalidateQueries({ predicate: (q) => ['rentals', 'rentalAssets', 'rentalProducts', 'invoices', 'customers', 'receivables', 'payments', 'products', 'stock', 'audit', 'sales'].some((p) => String(q.queryKey[0]).startsWith(p)) });
+      await qc.invalidateQueries({ predicate: (q) => ['rentals', 'rentalAssets', 'rentalProducts', 'invoices', 'customers', 'receivables', 'payments', 'products', 'stock', 'audit', 'sales', 'dashboard', 'reports'].some((p) => String(q.queryKey[0]).startsWith(p)) });
       toast.success(reserve ? `Reservation ${r.rentalNo} made` : `Rental ${r.rentalNo} issued`, [r.invoiceNo, r.saleInvoiceNo].filter(Boolean).join(' · ') || undefined);
       navigate(`/rentals/${r.id}`);
     } catch (e) {
@@ -299,7 +299,7 @@ export function NewRentalPage() {
             <Card>
               <CardHeader title="Also selling products? (optional)" description="They go on a separate sales invoice linked to this rental." />
               <div className="flex flex-col gap-2 p-4">
-                <ProductSearch onAdd={(p, qty) => setSaleLines((ls) => [...ls, { product: p, qty }])} />
+                <ProductSearch autoFocus={false} onAdd={(p, qty) => setSaleLines((ls) => [...ls, { product: p, qty }])} />
                 {saleLines.map((l, i) => (
                   <div key={`${l.product.id}-${i}`} className="grid grid-cols-[1fr_140px_100px_32px] items-center gap-2">
                     <span>

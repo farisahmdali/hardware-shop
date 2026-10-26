@@ -3,6 +3,7 @@ import { getAllSettings } from '../services/settings';
 import { getInvoice } from '../services/sales';
 import { customerLedger, getCustomer } from '../services/customers';
 import { getRental } from '../services/rentals';
+import { getSupplier, supplierLedger } from '../services/suppliers';
 import { AppError, ErrorCodes } from '@shared/errors';
 import { amountInWords } from '@shared/billing';
 import { formatMoney } from '@shared/money';
@@ -286,6 +287,115 @@ function statementA4(db: Db, customerId: number, asOf: string, from?: string, to
   return page(`Statement ${c.name}`, A4_CSS, body);
 }
 
+// ---------- Debit note (goods returned to a supplier) ----------
+
+function debitNoteA4(db: Db, id: number): string {
+  const dn = db
+    .prepare(
+      `SELECT d.*, p.purchase_no, p.supplier_invoice_no, p.supplier_invoice_date, p.supplier_name, p.supplier_gstin,
+              p.shop_state_code, s.address AS supplier_address, s.phone AS supplier_phone
+       FROM debit_notes d JOIN purchases p ON p.id = d.purchase_id JOIN suppliers s ON s.id = d.supplier_id WHERE d.id = ?`,
+    )
+    .get(id) as
+    | {
+        debit_note_no: string;
+        issued_at: string;
+        purchase_no: string;
+        supplier_invoice_no: string;
+        supplier_invoice_date: string;
+        supplier_name: string;
+        supplier_gstin: string;
+        shop_state_code: string;
+        supplier_address: string;
+        supplier_phone: string;
+        reason: string;
+        settlement: string;
+        taxable_total: number;
+        cgst_total: number;
+        sgst_total: number;
+        igst_total: number;
+        total: number;
+      }
+    | undefined;
+  if (!dn) throw new AppError(ErrorCodes.NOT_FOUND, 'Debit note not found.');
+  const lines = db
+    .prepare(
+      `SELECT l.name, l.sku, l.hsn_code, l.unit_code, l.gst_rate_bp, l.unit_cost, dl.qty, dl.taxable, dl.cgst, dl.sgst, dl.igst, dl.line_total
+       FROM debit_note_lines dl JOIN purchase_lines l ON l.id = dl.purchase_line_id WHERE dl.debit_note_id = ? ORDER BY dl.id`,
+    )
+    .all(id) as { name: string; sku: string; hsn_code: string; unit_code: string; gst_rate_bp: number; unit_cost: number; qty: number; taxable: number; cgst: number; sgst: number; igst: number; line_total: number }[];
+  const { s, address } = shopBlock(db);
+  const body = `
+    <div class="head">
+      <div><h1>${esc(s.shop.name)}</h1>${address.map((a) => `<div>${esc(a)}</div>`).join('')}
+        ${s.shop.phone ? `<div>Phone: ${esc(s.shop.phone)}</div>` : ''}${s.shop.gstin ? `<div class="b">GSTIN: ${esc(s.shop.gstin)}</div>` : ''}
+        <div>State: ${esc(stateName(dn.shop_state_code))} (${esc(dn.shop_state_code)})</div></div>
+      <div class="r"><h2>DEBIT NOTE</h2><div style="margin-top:6px">No: <span class="b">${esc(dn.debit_note_no)}</span></div>
+        <div>Date: ${esc(formatDateTime(dn.issued_at))}</div>
+        <div>Against your bill ${esc(dn.supplier_invoice_no || '(no number)')} of ${esc(formatDate(dn.supplier_invoice_date))}</div>
+        <div class="muted">Our purchase ${esc(dn.purchase_no)}</div></div>
+    </div>
+    <div class="box" style="margin-top:8px"><div class="muted">To (supplier)</div><div class="b">${esc(dn.supplier_name)}</div>
+      ${dn.supplier_address ? `<div>${esc(dn.supplier_address)}</div>` : ''}${dn.supplier_phone ? `<div>Phone: ${esc(dn.supplier_phone)}</div>` : ''}
+      ${dn.supplier_gstin ? `<div>GSTIN: ${esc(dn.supplier_gstin)}</div>` : ''}</div>
+    <table class="items"><thead><tr><th>Item returned</th><th>HSN</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Taxable</th><th>GST</th><th class="r">Tax</th><th class="r">Amount</th></tr></thead>
+      <tbody>${lines
+        .map(
+          (l) => `<tr><td>${esc(l.name)}<div class="muted">${esc(l.sku)}</div></td><td class="c">${esc(l.hsn_code)}</td>
+            <td class="r nowrap">${esc(formatQty(l.qty))} ${esc(l.unit_code)}</td><td class="r">${m(l.unit_cost)}</td><td class="r">${m(l.taxable)}</td>
+            <td class="c">${rate(l.gst_rate_bp)}</td><td class="r">${m(l.cgst + l.sgst + l.igst)}</td><td class="r b">${m(l.line_total)}</td></tr>`,
+        )
+        .join('')}</tbody></table>
+    <div style="display:flex; gap:16px; margin-top:8px">
+      <div style="flex:1"><div><span class="muted">Reason for return:</span> ${esc(dn.reason)}</div>
+        <div><span class="muted">To be settled by:</span> ${dn.settlement === 'REFUND' ? 'refund to us' : 'adjustment against our account'}</div>
+        <div style="margin-top:4px"><span class="muted">Amount in words:</span> <span class="b">${esc(amountInWords(dn.total))}</span></div></div>
+      <table class="totals" style="width:240px">
+        <tr><td>Taxable value</td><td class="r">${m(dn.taxable_total)}</td></tr>
+        ${dn.cgst_total ? `<tr><td>CGST</td><td class="r">${m(dn.cgst_total)}</td></tr><tr><td>SGST</td><td class="r">${m(dn.sgst_total)}</td></tr>` : ''}
+        ${dn.igst_total ? `<tr><td>IGST</td><td class="r">${m(dn.igst_total)}</td></tr>` : ''}
+        <tr class="grand"><td>Total</td><td class="r">₹ ${m(dn.total)}</td></tr>
+      </table>
+    </div>
+    <div class="foot"><div class="sign">Received by (supplier)<div class="line">&nbsp;</div></div><div class="sign">For ${esc(s.shop.name)}<div class="line">Authorised signatory</div></div></div>`;
+  return page(`Debit note ${dn.debit_note_no}`, A4_CSS, body);
+}
+
+// ---------- Supplier statement ----------
+
+function supplierStatementA4(db: Db, supplierId: number, asOf: string, from?: string, to?: string): string {
+  const sup = getSupplier(db, supplierId, asOf);
+  const ledger = supplierLedger(db, supplierId, { from, to }, asOf);
+  const { s, address } = shopBlock(db);
+  const bal = (b: number) => (b === 0 ? '0.00' : b > 0 ? `${m(b)} Cr` : `${m(-b)} Dr`);
+  const body = `
+    <div class="head">
+      <div><h1>${esc(s.shop.name)}</h1>${address.map((a) => `<div>${esc(a)}</div>`).join('')}${s.shop.phone ? `<div>Phone: ${esc(s.shop.phone)}</div>` : ''}</div>
+      <div class="r"><h2>SUPPLIER ACCOUNT</h2><div style="margin-top:6px">${esc(formatDate(ledger.from))} to ${esc(formatDate(ledger.to))}</div>
+        <div>Printed ${esc(formatDate(asOf))}</div></div>
+    </div>
+    <div class="box" style="margin-top:8px"><div class="b">${esc(sup.name)}</div>${sup.businessName ? `<div>${esc(sup.businessName)}</div>` : ''}
+      ${sup.address ? `<div>${esc(sup.address)}</div>` : ''}${sup.phone ? `<div>Phone: ${esc(sup.phone)}</div>` : ''}${sup.gstin ? `<div>GSTIN: ${esc(sup.gstin)}</div>` : ''}
+      <div class="muted">Supplier code ${esc(sup.code)}</div></div>
+    <table class="items"><thead><tr><th>Date</th><th>Document</th><th>Details</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead>
+      <tbody>
+        <tr><td>${esc(formatDate(ledger.from))}</td><td></td><td class="b">Opening balance</td><td></td><td></td><td class="r b">${bal(ledger.openingBalance)}</td></tr>
+        ${ledger.rows
+          .map(
+            (r) => `<tr><td class="nowrap">${esc(formatDate(r.businessDate))}</td><td class="nowrap">${esc(r.docNo)}</td><td>${esc(r.description)}</td>
+              <td class="r">${r.debit ? m(r.debit) : ''}</td><td class="r">${r.credit ? m(r.credit) : ''}</td><td class="r">${bal(r.balance)}</td></tr>`,
+          )
+          .join('')}
+      </tbody></table>
+    <table class="totals" style="width:300px; margin-left:auto; margin-top:8px">
+      <tr><td>Total debits</td><td class="r">${m(ledger.totalDebit)}</td></tr>
+      <tr><td>Total credits</td><td class="r">${m(ledger.totalCredit)}</td></tr>
+      <tr class="grand"><td>Closing balance</td><td class="r">${bal(ledger.closingBalance)}</td></tr>
+    </table>
+    <p class="muted">Cr = amount we owe you. Dr = advances or returns in our favour. Please tell us if anything here does not match your records.</p>`;
+  return page(`Supplier account ${sup.name}`, A4_CSS, body);
+}
+
 // ---------- Rental agreement ----------
 
 function rentalAgreementA4(db: Db, id: number): string {
@@ -381,6 +491,16 @@ export function renderDocument(
     const html = creditNoteA4(db, id);
     const no = (db.prepare('SELECT credit_note_no FROM credit_notes WHERE id = ?').get(id) as { credit_note_no: string }).credit_note_no;
     return { html, title: no.replace(/\//g, '-') };
+  }
+  if (kind === 'DEBIT_NOTE') {
+    const html = debitNoteA4(db, id);
+    const no = (db.prepare('SELECT debit_note_no FROM debit_notes WHERE id = ?').get(id) as { debit_note_no: string }).debit_note_no;
+    return { html, title: no.replace(/\//g, '-') };
+  }
+  if (kind === 'SUPPLIER_STATEMENT') {
+    const html = supplierStatementA4(db, id, asOf, range.from, range.to);
+    const code = (db.prepare('SELECT code FROM suppliers WHERE id = ?').get(id) as { code: string }).code;
+    return { html, title: `supplier-account-${code}` };
   }
   const html = statementA4(db, id, asOf, range.from, range.to);
   const code = (db.prepare('SELECT code FROM customers WHERE id = ?').get(id) as { code: string }).code;

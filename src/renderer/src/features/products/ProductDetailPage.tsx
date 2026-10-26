@@ -5,7 +5,7 @@ import { formatMoney, mulDivRound } from '@shared/money';
 import { formatQty } from '@shared/qty';
 import { formatDateTime } from '@shared/time';
 import { errorMessage, useCommandMutation, useCommandQuery } from '../../lib/api';
-import { useCan, useCanSeeCost } from '../../lib/session';
+import { useCan, useCanSeeCost, useCanViewPurchasing } from '../../lib/session';
 import { useToast } from '../../lib/toast';
 import { Button } from '../../components/ui/button';
 import { ConfirmDialog } from '../../components/ui/dialog';
@@ -16,6 +16,7 @@ import { MovementsTable } from './MovementsTable';
 import { ProductFormDialog } from './ProductFormDialog';
 import { StockAdjustDialog } from './StockAdjustDialog';
 import { StockBadge } from './shared';
+import { PurchasesTable } from '../suppliers/PurchasesTable';
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'danger' | 'warning' }) {
   return (
@@ -32,6 +33,7 @@ function Stat({ label, value, sub, tone }: { label: string; value: string; sub?:
 export function ProductDetailPage() {
   const id = Number(useParams().id);
   const can = useCan();
+  const canViewPurchasing = useCanViewPurchasing();
   const showCost = useCanSeeCost();
   const toast = useToast();
   const product = useCommandQuery('products.get', { id }, { enabled: Number.isInteger(id) });
@@ -102,6 +104,7 @@ export function ProductDetailPage() {
       <Tabs defaultValue="movements">
         <TabsList className="mb-4">
           <TabsTrigger value="movements">Stock movements</TabsTrigger>
+          {canViewPurchasing && <TabsTrigger value="purchases">Purchases</TabsTrigger>}
           <TabsTrigger value="details">Details</TabsTrigger>
           {can('audit.view') && <TabsTrigger value="history">Change history</TabsTrigger>}
         </TabsList>
@@ -110,6 +113,13 @@ export function ProductDetailPage() {
             <MovementsTable productId={p.id} />
           </Card>
         </TabsContent>
+        {canViewPurchasing && (
+          <TabsContent value="purchases">
+            <Card>
+              <PurchasesTable productId={p.id} />
+            </Card>
+          </TabsContent>
+        )}
         <TabsContent value="details">
           <Card>
             <CardHeader title="Product details" />
@@ -123,7 +133,6 @@ export function ProductDetailPage() {
                   { label: 'Preferred supplier', value: p.supplierName ?? '—' },
                   { label: 'Description', value: p.description || '—' },
                   { label: 'Notes', value: p.notes || '—' },
-                  { label: 'Sales and purchases', value: <span className="text-ink-3">Listed here once billing and purchasing are in use.</span> },
                   { label: 'Added', value: formatDateTime(p.createdAt) },
                   { label: 'Last changed', value: formatDateTime(p.updatedAt) },
                 ]}

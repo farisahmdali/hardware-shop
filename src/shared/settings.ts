@@ -95,6 +95,18 @@ export const rentalSettingsSchema = z.object({
     ),
 });
 
+export const purchaseSettingsSchema = z.object({
+  /**
+   * Keep GST paid on purchases out of stock cost, as input tax credit. Applies only when the shop is
+   * GST registered and the supplier has a GSTIN; otherwise the GST paid is part of the cost of the goods.
+   */
+  claimInputGst: z.boolean().default(true),
+  /** Days the shop has to pay a supplier's bill, unless the supplier has their own period. */
+  defaultCreditDays: z.number().int().min(0).max(365).default(30),
+  /** Largest round-off accepted to match a supplier's bill total, in paise. */
+  maxRoundOff: z.number().int().min(0).max(10_000).default(1_000),
+});
+
 export const settingsSchemas = {
   shop: shopProfileSchema,
   tax: taxSettingsSchema,
@@ -104,6 +116,7 @@ export const settingsSchemas = {
   receivables: receivableSettingsSchema,
   printing: printingSettingsSchema,
   rental: rentalSettingsSchema,
+  purchases: purchaseSettingsSchema,
 } as const;
 
 export type SettingsSection = keyof typeof settingsSchemas;
@@ -122,5 +135,6 @@ export function defaultSettings(): Omit<AllSettings, 'shop'> {
     receivables: receivableSettingsSchema.parse({}),
     printing: printingSettingsSchema.parse({}),
     rental: rentalSettingsSchema.parse({}),
+    purchases: purchaseSettingsSchema.parse({}),
   };
 }

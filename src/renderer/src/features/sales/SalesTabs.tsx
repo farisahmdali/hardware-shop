@@ -10,6 +10,9 @@ export function SalesTabs() {
     { to: '/sales/held', label: `Held bills${held.data?.length ? ` (${held.data.length})` : ''}` },
   ];
   return (
+    <>
+    {/* The tabs replace a visible title on the sales screens; screen readers still get one. */}
+    <h1 className="sr-only">Sales & Billing</h1>
     <nav className="flex gap-1 rounded-lg bg-surface-2 p-1" aria-label="Sales sections">
       {tabs.map((t) => (
         <NavLink
@@ -24,5 +27,6 @@ export function SalesTabs() {
         </NavLink>
       ))}
     </nav>
+    </>
   );
 }

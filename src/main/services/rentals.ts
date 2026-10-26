@@ -1281,6 +1281,14 @@ export function rentalSummary(db: Db, nowIso: string, todayEndIso: string): Rent
               COALESCE(SUM(status = 'AWAITING_INSPECTION'), 0) AS insp FROM rental_assets`,
     )
     .get() as { out_: number; avail: number; insp: number };
+  const unpaid = (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(b.outstanding), 0) AS u FROM invoices i JOIN v_invoice_balances b ON b.invoice_id = i.id
+         WHERE i.kind = 'RENTAL' AND b.cancelled = 0 AND b.outstanding > 0`,
+      )
+      .get() as { u: number }
+  ).u;
   return {
     active: s.active,
     overdue: s.overdue,
@@ -1290,5 +1298,6 @@ export function rentalSummary(db: Db, nowIso: string, todayEndIso: string): Rent
     unitsOut: units.out_,
     unitsAvailable: units.avail,
     awaitingInspection: units.insp,
+    chargesUnpaid: unpaid,
   };
 }

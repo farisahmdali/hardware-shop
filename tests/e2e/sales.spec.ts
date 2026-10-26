@@ -123,7 +123,7 @@ test('sales: walk-in bill with change, PDF, credit customer, payment, return, ca
   await page.getByRole('link', { name: 'Data health' }).click();
   await page.getByRole('button', { name: 'Run full check' }).click();
   await expect(page.getByText('No problems found')).toBeVisible();
-  await expect(page.getByText(/customer-balances/)).toBeVisible();
+  await expect(page.getByText('Customer balances match their bills, payments and credit')).toBeVisible();
   expect(existsSync(pdf)).toBe(true);
   await app.close();
 });

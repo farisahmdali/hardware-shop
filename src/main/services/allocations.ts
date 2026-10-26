@@ -21,29 +21,20 @@ export interface CreditSource {
 }
 
 /** Amounts the customer still owes, oldest first. */
-export function openReceivables(db: Db, customerId: number): OpenReceivable[] {
-  return (
-    db
-      .prepare(
-        `SELECT doc_type AS docType, doc_id AS docId, doc_no AS docNo, business_date AS businessDate, outstanding
-         FROM v_receivables WHERE customer_id = ? AND cancelled = 0 AND outstanding > 0
-         ORDER BY business_date, doc_type, doc_id`,
-      )
-      .all(customerId) as OpenReceivable[]
-  );
+export function openReceivables(db: Db, customerId: number, only?: { type: 'INVOICE' | 'ADJUSTMENT'; id: number }): OpenReceivable[] {
+  const select = `SELECT doc_type AS docType, doc_id AS docId, doc_no AS docNo, business_date AS businessDate, outstanding
+     FROM v_receivables WHERE customer_id = ? AND cancelled = 0 AND outstanding > 0`;
+  // One document is looked up directly: a customer's full list can be long (the walk-in customer has every counter sale).
+  if (only) return db.prepare(`${select} AND doc_type = ? AND doc_id = ?`).all(customerId, only.type, only.id) as OpenReceivable[];
+  return db.prepare(`${select} ORDER BY business_date, doc_type, doc_id`).all(customerId) as OpenReceivable[];
 }
 
 /** Unused payments, credit notes and credit adjustments, oldest first. */
-export function creditSources(db: Db, customerId: number): CreditSource[] {
-  return (
-    db
-      .prepare(
-        `SELECT source_type AS sourceType, source_id AS sourceId, business_date AS businessDate, unallocated
-         FROM v_credit_sources WHERE customer_id = ? AND reversed = 0 AND unallocated > 0
-         ORDER BY business_date, source_type, source_id`,
-      )
-      .all(customerId) as CreditSource[]
-  );
+export function creditSources(db: Db, customerId: number, only?: { type: SourceType; id: number }): CreditSource[] {
+  const select = `SELECT source_type AS sourceType, source_id AS sourceId, business_date AS businessDate, unallocated
+     FROM v_credit_sources WHERE customer_id = ? AND reversed = 0 AND unallocated > 0`;
+  if (only) return db.prepare(`${select} AND source_type = ? AND source_id = ?`).all(customerId, only.type, only.id) as CreditSource[];
+  return db.prepare(`${select} ORDER BY business_date, source_type, source_id`).all(customerId) as CreditSource[];
 }
 
 export function availableCredit(db: Db, customerId: number): number {
@@ -83,10 +74,8 @@ export function applyCreditFifo(
   customerId: number,
   opts: { onlySource?: { type: SourceType; id: number }; onlyTarget?: { type: 'INVOICE' | 'ADJUSTMENT'; id: number }; limit?: number } = {},
 ): number {
-  let sources = creditSources(tx.db, customerId);
-  if (opts.onlySource) sources = sources.filter((s) => s.sourceType === opts.onlySource!.type && s.sourceId === opts.onlySource!.id);
-  let targets = openReceivables(tx.db, customerId);
-  if (opts.onlyTarget) targets = targets.filter((t) => t.docType === opts.onlyTarget!.type && t.docId === opts.onlyTarget!.id);
+  const sources = creditSources(tx.db, customerId, opts.onlySource);
+  const targets = openReceivables(tx.db, customerId, opts.onlyTarget);
   let budget = opts.limit ?? Number.MAX_SAFE_INTEGER;
   let applied = 0;
   let si = 0;

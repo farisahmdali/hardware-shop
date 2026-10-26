@@ -29,6 +29,13 @@ import { RentalProductPage } from './features/rentals/RentalProductPage';
 import { RentalsPage } from './features/rentals/RentalsPage';
 import { NewRentalPage } from './features/rentals/NewRentalPage';
 import { RentalDetailPage } from './features/rentals/RentalDetailPage';
+import { SuppliersPage } from './features/suppliers/SuppliersPage';
+import { SupplierDetailPage } from './features/suppliers/SupplierDetailPage';
+import { NewPurchasePage } from './features/suppliers/NewPurchasePage';
+import { PurchaseDetailPage } from './features/suppliers/PurchaseDetailPage';
+import { ExpensesPage } from './features/expenses/ExpensesPage';
+import { ReportsPage } from './features/reports/ReportsPage';
+import { ReportPage } from './features/reports/ReportPage';
 
 /** Decides between first-run setup, sign-in and the application itself. */
 export function App() {
@@ -69,6 +76,13 @@ export function App() {
           <Route path="/rentals" element={<RentalsPage />} />
           <Route path="/rentals/new" element={<NewRentalPage />} />
           <Route path="/rentals/:id" element={<RentalDetailPage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
+          <Route path="/suppliers/purchases/new" element={<NewPurchasePage />} />
+          <Route path="/suppliers/purchases/:id" element={<PurchaseDetailPage />} />
+          <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+          <Route path="/expenses" element={<ExpensesPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reports/:id" element={<ReportPage />} />
           <Route path="/products" element={<ProductsListPage />} />
           <Route path="/products/movements" element={<MovementsPage />} />
           <Route path="/products/counts" element={<StockCountsPage />} />

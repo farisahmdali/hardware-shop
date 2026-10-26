@@ -207,3 +207,16 @@ describe('integrity checks', () => {
     expect(runIntegrityChecks(env.db, { quickOnly: true }).issues.map((i) => i.check)).toContain('settings');
   });
 });
+
+describe('long-running use', () => {
+  it('prepares each SQL statement once per connection, so memory does not grow with use', () => {
+    const sql = 'SELECT COUNT(*) AS n FROM audit_log WHERE action = ?';
+    const first = env.db.prepare(sql);
+    for (let i = 0; i < 1000; i++) expect(env.db.prepare(sql)).toBe(first);
+    expect(env.db.prepare('SELECT 1')).not.toBe(first);
+    // A reused statement gives fresh results each time.
+    const before = (first.get('SETUP_COMPLETED') as { n: number }).n;
+    setupOwner(env);
+    expect((env.db.prepare(sql).get('SETUP_COMPLETED') as { n: number }).n).toBe(before + 1);
+  });
+});

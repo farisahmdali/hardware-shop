@@ -115,6 +115,6 @@ test('rentals: issue with deposit, extend, damaged return, deposit settlement, c
   await page.getByRole('link', { name: 'Data health' }).click();
   await page.getByRole('button', { name: 'Run full check' }).click();
   await expect(page.getByText('No problems found')).toBeVisible();
-  await expect(page.getByText(/deposit-ledger/)).toBeVisible();
+  await expect(page.getByText('Deposits held match the deposit account')).toBeVisible();
   await app.close();
 });

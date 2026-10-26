@@ -239,7 +239,7 @@ export interface SalesSummary {
   collectedToday: { methodName: string; kind: string; amount: number }[];
 }
 
-export type DocumentKind = 'INVOICE' | 'CREDIT_NOTE' | 'RECEIPT' | 'STATEMENT' | 'RENTAL_AGREEMENT';
+export type DocumentKind = 'INVOICE' | 'CREDIT_NOTE' | 'RECEIPT' | 'STATEMENT' | 'RENTAL_AGREEMENT' | 'DEBIT_NOTE' | 'SUPPLIER_STATEMENT';
 export type Paper = 'A4' | 'THERMAL_80' | 'THERMAL_58';
 
 // ---------- Input schemas ----------
@@ -455,7 +455,7 @@ export const salesCommands = {
 
   'print.render': command<{ html: string; title: string }>()(
     z.object({
-      kind: z.enum(['INVOICE', 'CREDIT_NOTE', 'RECEIPT', 'STATEMENT', 'RENTAL_AGREEMENT']),
+      kind: z.enum(['INVOICE', 'CREDIT_NOTE', 'RECEIPT', 'STATEMENT', 'RENTAL_AGREEMENT', 'DEBIT_NOTE', 'SUPPLIER_STATEMENT']),
       id,
       paper: z.enum(['A4', 'THERMAL_80', 'THERMAL_58']).default('A4'),
       from: isoDate.optional(),
@@ -464,7 +464,7 @@ export const salesCommands = {
   ),
   'print.pdf': command<{ path: string } | null>()(
     z.object({
-      kind: z.enum(['INVOICE', 'CREDIT_NOTE', 'RECEIPT', 'STATEMENT', 'RENTAL_AGREEMENT']),
+      kind: z.enum(['INVOICE', 'CREDIT_NOTE', 'RECEIPT', 'STATEMENT', 'RENTAL_AGREEMENT', 'DEBIT_NOTE', 'SUPPLIER_STATEMENT']),
       id,
       paper: z.enum(['A4', 'THERMAL_80', 'THERMAL_58']).default('A4'),
       from: isoDate.optional(),
@@ -473,7 +473,7 @@ export const salesCommands = {
   ),
   'print.send': command<{ printed: boolean }>()(
     z.object({
-      kind: z.enum(['INVOICE', 'CREDIT_NOTE', 'RECEIPT', 'STATEMENT', 'RENTAL_AGREEMENT']),
+      kind: z.enum(['INVOICE', 'CREDIT_NOTE', 'RECEIPT', 'STATEMENT', 'RENTAL_AGREEMENT', 'DEBIT_NOTE', 'SUPPLIER_STATEMENT']),
       id,
       paper: z.enum(['A4', 'THERMAL_80', 'THERMAL_58']).default('A4'),
       from: isoDate.optional(),

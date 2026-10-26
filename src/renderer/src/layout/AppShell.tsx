@@ -44,7 +44,7 @@ export function AppShell({ status, shopName, children }: { status: AppStatus; sh
 
         <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Main">
           <ul className="flex flex-col gap-0.5">
-            {NAV_ITEMS.filter((n) => !n.permission || can(n.permission)).map((item) => (
+            {NAV_ITEMS.filter((n) => (!n.permission || can(n.permission)) && (!n.anyPermission || n.anyPermission.some(can))).map((item) => (
               <li key={item.path}>
                 <NavLink
                   to={item.path}

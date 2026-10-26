@@ -14,10 +14,10 @@ The application is built in phases. Each phase is tested before the next one sta
 | 2 | Products and stock: catalogue, categories/brands/units, stock movements with weighted-average cost, adjustments, stock counts, low-stock alerts, CSV/Excel import and export | **Done** |
 | 3 | Customers and ledgers, counter billing with GST, discounts, split and credit payments, held bills, invoices and receipts (print/PDF), returns and credit notes, cancellations, payments, refunds and reversals, outstanding and ageing | **Done** |
 | 4 | Rental items, units and rates, pricing engine, reservations and issue (with a combined sale), double-booking guard, extensions, overdue, return and inspection, late and damage charges, security deposits, close, rental agreement print/PDF, unit history | **Done** |
-| 5 | Suppliers, purchases, expenses, cash | Planned |
-| 6 | Reports and dashboard | Planned |
-| 7 | Full history screens, scheduled backups, restore, permission review | Planned |
-| 8 | Release testing, installer, user documentation | Planned |
+| 5 | Suppliers and their accounts, purchase bills with GST, input tax credit and freight in the cost, supplier payments, advances and refunds, supplier returns (debit notes), payables and ageing, expenses with audited corrections, cash entries, daily cash book and cash counts | **Done** |
+| 6 | About 45 reports (sales, stock, rentals, money and profit, GST, customers and suppliers) with filters, sorting and Excel/CSV/PDF export and printing, run in a background worker; dashboard with a chosen period, separately labelled sales, collections, deposits, expenses and estimated profit, a daily chart, recent transactions and significant changes | **Done** |
+| 7 | History screen with search by product, customer, supplier, bill or receipt, filters by date, module, action and user, before/after changes, links between records and transactions, CSV/PDF export; history on each record; every refused action recorded; automatic backups with retention; restore with checks, a copy of the current data first, and automatic undo of an unfinished restore; history and accounting completeness checks | **Done** |
+| 8 | Recovery tests (the process killed in the middle of sales, payments, purchases and backups; upgrades from every earlier version and over a populated database; long randomized operation sequences); performance run on a two-year, 100,000-bill shop and the fixes it led to (a memory leak, data and backup checks moved off the main thread, fast customer screens, an upgrade notice); setting up a new computer from a backup; usability check at 1366 × 768; Windows installer with an app icon; install/upgrade/uninstall test with a network check; user, installation, backup and upgrade guides and a test report | **Done** |
 
 ## Development
 
@@ -30,6 +30,9 @@ npm test             # unit + integration tests (real SQLite, inside Electron's 
 npm run test:e2e     # builds, then drives the real app with Playwright
 npm run typecheck
 npm run build        # production bundles in out/
+npm run perf         # performance run on a large generated shop (first run generates it, ~10 min)
+npm run dist         # Windows installer in release/
+npm run test:install # builds test installers, then installs, upgrades and uninstalls them
 ```
 
 While developing, set `HWS_DATA_DIR` to a scratch folder so you don't touch real shop data:
@@ -50,6 +53,11 @@ If your editor sets `ELECTRON_RUN_AS_NODE` (VS Code does in its terminals), clea
 
 ## Documentation
 
+- [docs/USER_GUIDE.md](docs/USER_GUIDE.md): everyday use, for the owner and staff
+- [docs/INSTALL.md](docs/INSTALL.md): installing, first start, uninstalling
+- [docs/BACKUP_RECOVERY.md](docs/BACKUP_RECOVERY.md): backups, restore, moving to a new computer, what to do when something goes wrong
+- [docs/UPGRADING.md](docs/UPGRADING.md): installing new versions without losing data; rules for database changes
+- [docs/TEST_REPORT.md](docs/TEST_REPORT.md): what is tested, performance measurements, release checks
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the application is put together
 - [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md): money, tax, stock, rental and correction rules
 - [docs/SCHEMA.md](docs/SCHEMA.md): database tables and conventions

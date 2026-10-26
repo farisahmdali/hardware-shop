@@ -5,5 +5,5 @@
     "lib": ["ES2023"],
     "types": ["node", "vite/client"]
   },
-  "include": ["electron.vite.config.ts", "vitest.config.ts", "playwright.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*", "scripts/**/*.ts"]
+  "include": ["electron.vite.config.ts", "vitest.config.ts", "vitest.perf.config.ts", "playwright.config.ts", "playwright.install.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*", "scripts/**/*.ts"]
 }

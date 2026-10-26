@@ -62,7 +62,20 @@ export interface PaymentEntry {
 }
 
 /** Payment method buttons plus editable payment rows. */
-export function PaymentLines({ due, value, onChange, label = 'Payment now (optional)' }: { due: number; value: PaymentEntry[]; onChange(p: PaymentEntry[]): void; label?: string }) {
+export function PaymentLines({
+  due,
+  value,
+  onChange,
+  label = 'Payment now (optional)',
+  remainder = "stays on the customer's account",
+}: {
+  due: number;
+  value: PaymentEntry[];
+  onChange(p: PaymentEntry[]): void;
+  label?: string;
+  /** What happens to an unpaid remainder. */
+  remainder?: string;
+}) {
   const methods = useCommandQuery('paymentMethods.list', {});
   const paid = value.reduce((a, p) => a + (p.amount ?? 0), 0);
   return (
@@ -108,7 +121,7 @@ export function PaymentLines({ due, value, onChange, label = 'Payment now (optio
       {due > 0 && (
         <p className="text-[13px] text-ink-3">
           Due {formatMoney(due)} · paying {formatMoney(paid)}
-          {due - paid > 0 && ` · ${formatMoney(due - paid)} stays on the customer's account`}
+          {due - paid > 0 && ` · ${formatMoney(due - paid)} ${remainder}`}
         </p>
       )}
     </div>

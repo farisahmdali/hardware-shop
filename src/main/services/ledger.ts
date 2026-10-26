@@ -60,7 +60,14 @@ function accountId(db: Db, code: AccountCode): number {
  */
 export function postLedger(
   tx: Tx,
-  entry: { refType: string; refId: string | number; memo?: string; lines: LedgerLine[] },
+  entry: {
+    refType: string;
+    refId: string | number;
+    memo?: string;
+    lines: LedgerLine[];
+    /** The day the money moved, when it is not today (expenses entered afterwards). */
+    businessDate?: string;
+  },
 ): void {
   const lines = entry.lines.filter((l) => (l.debit ?? 0) !== 0 || (l.credit ?? 0) !== 0);
   if (lines.length === 0) return;
@@ -86,7 +93,7 @@ export function postLedger(
     insert.run(
       tx.txnRef,
       tx.nowIso,
-      tx.businessDate,
+      entry.businessDate ?? tx.businessDate,
       accountId(tx.db, l.account),
       l.partyType ?? null,
       l.partyId ?? null,

@@ -51,16 +51,34 @@ function arAccountId(db: Db): number {
   return (db.prepare("SELECT id FROM accounts WHERE code = 'AR'").get() as { id: number }).id;
 }
 
-/** Customer columns plus the ledger balance and overdue amount, both derived from records. */
+const SETTLED_INVOICE = "COALESCE((SELECT SUM(a.amount) FROM allocations a WHERE a.target_type = 'INVOICE' AND a.target_id = i.id), 0)";
+const SETTLED_ADJUSTMENT = "COALESCE((SELECT SUM(a.amount) FROM allocations a WHERE a.target_type = 'ADJUSTMENT' AND a.target_id = b.id), 0)";
+
+/**
+ * Customer columns plus the ledger balance and overdue amount, both derived from records. Each is
+ * worked out per customer row (by index), only for the customers the query returns; summing
+ * every customer's history first made the list take over a second on a large shop. The walk-in
+ * customer never has a balance (walk-in sales are paid in full and its returns refunded; the
+ * data check confirms it), and its history is the largest, so it is not summed.
+ */
 function customerSelect(db: Db, asOf: string): { sql: string; params: unknown[] } {
   return {
-    sql: `SELECT c.*, COALESCE(b.balance, 0) AS balance, COALESCE(o.overdue, 0) AS overdue
-      FROM customers c
-      LEFT JOIN (SELECT party_id, SUM(debit - credit) AS balance FROM ledger_entries
-                 WHERE account_id = ? AND party_type = 'CUSTOMER' GROUP BY party_id) b ON b.party_id = c.id
-      LEFT JOIN (SELECT customer_id, SUM(outstanding) AS overdue FROM v_receivables
-                 WHERE cancelled = 0 AND outstanding > 0 AND due_date < ? GROUP BY customer_id) o ON o.customer_id = c.id`,
-    params: [arAccountId(db), asOf],
+    // Filters may use the aliases balance and overdue (SQLite resolves them in WHERE). Overdue is
+    // v_receivables (open, uncancelled bills and positive adjustments past their due date) written
+    // against the tables: SQLite cannot narrow the view to one customer inside a per-row
+    // subquery, and `+` keeps it from scanning every bill by due date instead of by customer.
+    sql: `SELECT c.*,
+        CASE WHEN c.is_walkin = 1 THEN 0 ELSE COALESCE((SELECT SUM(l.debit - l.credit) FROM ledger_entries l
+          WHERE l.party_type = 'CUSTOMER' AND l.party_id = c.id AND l.account_id = ?), 0) END AS balance,
+        CASE WHEN c.is_walkin = 1 THEN 0 ELSE
+          COALESCE((SELECT SUM(i.grand_total - ${SETTLED_INVOICE}) FROM invoices i
+            WHERE i.customer_id = c.id AND +i.due_date < ? AND i.grand_total > ${SETTLED_INVOICE}
+              AND NOT EXISTS (SELECT 1 FROM invoice_cancellations x WHERE x.invoice_id = i.id)), 0)
+          + COALESCE((SELECT SUM(b.amount - ${SETTLED_ADJUSTMENT}) FROM balance_adjustments b
+            WHERE b.customer_id = c.id AND b.amount > 0 AND +b.business_date < ? AND b.amount > ${SETTLED_ADJUSTMENT}), 0)
+        END AS overdue
+      FROM customers c`,
+    params: [arAccountId(db), asOf, asOf],
   };
 }
 
@@ -88,9 +106,9 @@ export function listCustomers(
   const params: unknown[] = [];
   if (!f.includeWalkin) where.push('c.is_walkin = 0');
   if (f.active !== 'ALL') where.push(`c.is_active = ${f.active === 'ACTIVE' ? 1 : 0}`);
-  if (f.filter === 'OWES') where.push('COALESCE(b.balance, 0) > 0');
-  if (f.filter === 'CREDIT') where.push('COALESCE(b.balance, 0) < 0');
-  if (f.filter === 'OVERDUE') where.push('COALESCE(o.overdue, 0) > 0');
+  if (f.filter === 'OWES') where.push('balance > 0');
+  if (f.filter === 'CREDIT') where.push('balance < 0');
+  if (f.filter === 'OVERDUE') where.push('overdue > 0');
   const order: string[] = [];
   const orderParams: unknown[] = [];
   if (f.search) {
@@ -129,11 +147,15 @@ function loadCustomer(db: Db, id: number, asOf: string): CustomerRecord {
 
 export function getCustomer(db: Db, id: number, asOf: string): CustomerDetail {
   const r = loadCustomer(db, id, asOf);
-  const outstanding = (
-    db
-      .prepare('SELECT COALESCE(SUM(outstanding), 0) AS n FROM v_receivables WHERE customer_id = ? AND cancelled = 0 AND outstanding > 0')
-      .get(id) as { n: number }
-  ).n;
+  // The walk-in customer never owes or holds credit (see customerSelect); its history is not summed.
+  const walkIn = r.is_walkin === 1;
+  const outstanding = walkIn
+    ? 0
+    : (
+        db
+          .prepare('SELECT COALESCE(SUM(outstanding), 0) AS n FROM v_receivables WHERE customer_id = ? AND cancelled = 0 AND outstanding > 0')
+          .get(id) as { n: number }
+      ).n;
   const stats = db
     .prepare('SELECT COUNT(*) AS n, MAX(business_date) AS last FROM invoices WHERE customer_id = ?')
     .get(id) as { n: number; last: string | null };
@@ -145,7 +167,7 @@ export function getCustomer(db: Db, id: number, asOf: string): CustomerDetail {
     creditLimit: r.credit_limit,
     notes: r.notes,
     outstanding,
-    availableCredit: availableCredit(db, id),
+    availableCredit: walkIn ? 0 : availableCredit(db, id),
     invoiceCount: stats.n,
     lastInvoiceDate: stats.last,
     createdAt: r.created_at,

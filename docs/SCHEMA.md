@@ -105,10 +105,42 @@ Balances are views, never stored values:
 |---|---|
 | `v_deposit_balances` | Deposit held per rental |
 
-## Planned tables (later migrations)
+## Migration 005: purchases, expenses and cash
 
-Each later phase adds its own migration. Existing data is never dropped or rewritten destructively.
+`suppliers` gains `credit_days` and a trigger that prevents deletion. Every new table except `expenses` is **append-only**. Expenses can be corrected (with reversing ledger entries) or voided, never deleted; a voided expense cannot change.
 
-| Phase | Tables |
+| Table | Purpose |
 |---|---|
-| 5 | further supplier columns, `purchases`, `purchase_lines`, `purchase_cancellations`, `supplier_returns`, `supplier_return_lines`, `expenses`, `cash_entries`, `cash_reconciliations` |
+| `supplier_adjustments` | Supplier opening balances and authorised corrections (positive = the shop owes more). |
+| `purchases` | Purchase bills (`PUR/`): copy of the supplier's details, their bill number and date, GST treatment (intra/inter-state, input GST claimed or not), totals, freight and other charges, round-off, stock value added and due date. A `CHECK` requires total = taxable + taxes + charges + round-off. |
+| `purchase_lines` | Product, quantity, rate, discounts, taxable value, GST split, share of charges, landed value and the stock movement. |
+| `purchase_cancellations` | One row per cancelled purchase, with the reason. |
+| `debit_notes`, `debit_note_lines` | Goods returned to suppliers (`DN/`): proportional amounts, stock value removed, and how it is settled (adjusted or refunded). |
+| `supplier_allocations` | Links what reduces the shop's debt (payments made, debit notes, corrections in the shop's favour) to what it settles (purchases, opening balances, refunds received). Kept apart from customer allocations. |
+| `expenses` | Expenses (`EXP/`): category, amount, date paid, method, payee, status (active or void). |
+| `cash_entries`, `cash_entry_reversals` | Owner cash in, drawings, bank deposits and withdrawals (`CSH/`), and their reversals. |
+| `cash_counts` | Each count of the drawer: expected, counted, difference, notes and coins counted, explanation. |
+
+Supplier payments (`PAY/`) and refunds received from suppliers (`SRF/`) are rows in `payments` with `party_type = 'SUPPLIER'`; their reversals use `payment_reversals`.
+
+| View | What it returns |
+|---|---|
+| `v_purchase_balances` | Amount settled and still owed per purchase |
+| `v_payables` | Open purchases and opening balances owed to suppliers, with due dates |
+| `v_supplier_credits` | Unused supplier payments (advances), debit notes and corrections in the shop's favour |
+
+## Migration 006: report indexes
+
+Indexes only, no data changes: invoices by kind and date and by rental; invoice lines by rental charge; cancellations, credit notes, payment reversals, balance adjustments, debit notes and supplier adjustments by date; credit note and debit note lines by their note; purchases by the supplier's bill date; rental charges by type and time; rental items by item and issue time; deposits by type and date; cash counts with a difference.
+
+## Migration 007: backup retention
+
+`backup_history` gains `removed_at` and `removed_reason`. When the retention policy deletes an automatic backup's file, its history row is kept and marked with when and why, instead of being deleted.
+
+## Migration 008: party ledger index
+
+Index only, no data changes: `idx_ledger_party_account` on ledger entries by party, account and business date. Statements, the customer list and customer balances read one party's receivable or payable entries; without it a large shop scanned every party's entries for the period (found by the performance run).
+
+## Later migrations
+
+Each later phase that needs new tables adds its own migration. Existing data is never dropped or rewritten destructively.

@@ -1,5 +1,5 @@
 import type { Db } from '../db/connection';
-import { APPLICATION_ID } from '../db/connection';
+import { APPLICATION_ID, tableExists } from '../db/connection';
 import { LATEST_SCHEMA_VERSION, schemaVersion } from '../db/migrator';
 import { settingsSchemas, SETTINGS_SECTIONS } from '@shared/settings';
 import type { IntegrityIssue, IntegrityReport } from '@shared/contracts';
@@ -33,6 +33,16 @@ export const IMMUTABLE_TABLES = [
   'rental_charges',
   'rental_extensions',
   'deposit_transactions',
+  'supplier_adjustments',
+  'purchases',
+  'purchase_lines',
+  'purchase_cancellations',
+  'debit_notes',
+  'debit_note_lines',
+  'supplier_allocations',
+  'cash_entries',
+  'cash_entry_reversals',
+  'cash_counts',
 ];
 
 /** Other triggers that enforce business rules and must be present. */
@@ -52,6 +62,49 @@ export const REQUIRED_TRIGGERS = [
   'rental_items_no_delete',
   'rental_products_no_delete',
   'rental_assets_no_delete',
+  'suppliers_no_delete',
+  'expenses_no_delete',
+  'expenses_void_final',
+  'expenses_category_kind',
+  'expenses_category_kind_update',
+];
+
+/**
+ * Tables whose rows must each have been written with a history entry in the same transaction,
+ * or (for tables without a transaction reference) have a history entry about the record itself.
+ */
+const AUDITED_TABLES: [table: string, label: string, entityType?: string][] = [
+  ['invoices', 'invoices'],
+  ['invoice_cancellations', 'invoice cancellations'],
+  ['credit_notes', 'credit notes'],
+  ['payments', 'payments'],
+  ['payment_reversals', 'payment reversals'],
+  ['balance_adjustments', 'customer balance adjustments'],
+  ['stock_movements', 'stock movements'],
+  ['rental_agreements', 'rentals', 'rental'],
+  ['deposit_transactions', 'deposit movements'],
+  ['purchases', 'purchases'],
+  ['purchase_cancellations', 'purchase cancellations'],
+  ['debit_notes', 'debit notes'],
+  ['supplier_adjustments', 'supplier balance adjustments'],
+  ['cash_entries', 'cash entries'],
+  ['cash_counts', 'cash counts'],
+];
+
+const ref = (table: string, refType: string, extra = '') =>
+  `SELECT t.id FROM ${table} t WHERE ${extra || '1 = 1'} AND NOT EXISTS (SELECT 1 FROM ledger_entries l WHERE l.ref_type = ${refType} AND l.ref_id = CAST(t.id AS TEXT))`;
+
+/** Documents that must have accounting entries, as queries returning the ids of those that do not. */
+const LEDGER_DOCUMENTS: [string, string][] = [
+  ['invoices', ref('invoices', "'INVOICE'", 't.grand_total > 0')],
+  ['credit notes', ref('credit_notes', "'CREDIT_NOTE'")],
+  ['payments', ref('payments', "CASE t.purpose WHEN 'RECEIPT' THEN 'PAYMENT' WHEN 'REFUND' THEN 'REFUND' ELSE t.purpose END", "t.purpose IN ('RECEIPT', 'REFUND', 'SUPPLIER_PAYMENT', 'SUPPLIER_REFUND')")],
+  ['purchases', ref('purchases', "'PURCHASE'", 't.grand_total > 0')],
+  ['debit notes', ref('debit_notes', "'DEBIT_NOTE'")],
+  ['expenses', ref('expenses', "'EXPENSE'")],
+  ['deposit movements', ref('deposit_transactions', "'DEPOSIT_' || t.type")],
+  ['cash entries', ref('cash_entries', "'CASH_ENTRY'")],
+  ['cash count differences', ref('cash_counts', "'CASH_COUNT'", 't.difference != 0')],
 ];
 
 const issue = (check: string, message: string, details?: unknown): IntegrityIssue => ({
@@ -294,6 +347,133 @@ const checks: IntegrityCheck[] = [
     },
   },
   {
+    name: 'purchase-totals',
+    quick: false,
+    run(db) {
+      const rows = db
+        .prepare(
+          `SELECT p.id, p.purchase_no FROM purchases p
+           JOIN (SELECT purchase_id, SUM(taxable) AS t, SUM(cgst) AS c, SUM(sgst) AS s, SUM(igst) AS g, SUM(gross) AS gr,
+                        SUM(line_discount + bill_discount) AS d, SUM(additional_cost) AS a, SUM(landed_value) AS v
+                 FROM purchase_lines GROUP BY purchase_id) l ON l.purchase_id = p.id
+           WHERE l.t != p.taxable_total OR l.c != p.cgst_total OR l.s != p.sgst_total OR l.g != p.igst_total
+              OR l.gr != p.gross_total OR l.d != p.discount_total OR l.a != p.additional_costs OR l.v != p.inventory_value
+           LIMIT 50`,
+        )
+        .all();
+      return rows.length ? [issue('purchase-totals', `${rows.length} purchase(s) do not add up to their lines.`, rows)] : [];
+    },
+  },
+  {
+    name: 'supplier-allocations',
+    quick: true,
+    run(db) {
+      const sources = db
+        .prepare('SELECT source_type, source_id, amount, unallocated FROM v_supplier_credits WHERE unallocated < 0 OR unallocated > amount LIMIT 50')
+        .all();
+      const targets = db
+        .prepare('SELECT doc_type, doc_id, amount, outstanding FROM v_payables WHERE cancelled = 0 AND (outstanding < 0 OR outstanding > amount) LIMIT 50')
+        .all();
+      const cancelled = db.prepare('SELECT purchase_id FROM v_purchase_balances WHERE cancelled = 1 AND settled != 0 LIMIT 50').all();
+      const issues: IntegrityIssue[] = [];
+      if (sources.length) issues.push(issue('supplier-allocations', `${sources.length} supplier payment(s) or debit note(s) are applied beyond their amount.`, sources));
+      if (targets.length) issues.push(issue('supplier-allocations', `${targets.length} purchase bill(s) are settled beyond their amount.`, targets));
+      if (cancelled.length) issues.push(issue('supplier-allocations', `${cancelled.length} cancelled purchase(s) still hold payments.`, cancelled));
+      return issues;
+    },
+  },
+  {
+    name: 'supplier-balances',
+    quick: true,
+    run(db) {
+      // What the ledger says the shop owes = open bills − unused advances and debit notes, for every supplier.
+      const rows = db
+        .prepare(
+          `SELECT s.id, s.name, COALESCE(l.balance, 0) AS ledger, COALESCE(r.open, 0) - COALESCE(c.credit, 0) AS documents
+           FROM suppliers s
+           LEFT JOIN (SELECT party_id, SUM(credit - debit) AS balance FROM ledger_entries le JOIN accounts a ON a.id = le.account_id
+                      WHERE a.code = 'AP' AND le.party_type = 'SUPPLIER' GROUP BY party_id) l ON l.party_id = s.id
+           LEFT JOIN (SELECT supplier_id, SUM(outstanding) AS open FROM v_payables WHERE cancelled = 0 GROUP BY supplier_id) r
+             ON r.supplier_id = s.id
+           LEFT JOIN (SELECT supplier_id, SUM(unallocated) AS credit FROM v_supplier_credits WHERE reversed = 0 GROUP BY supplier_id) c
+             ON c.supplier_id = s.id
+           WHERE COALESCE(l.balance, 0) != COALESCE(r.open, 0) - COALESCE(c.credit, 0)
+           LIMIT 50`,
+        )
+        .all();
+      return rows.length
+        ? [issue('supplier-balances', `${rows.length} supplier balance(s) do not match their bills and payments.`, rows)]
+        : [];
+    },
+  },
+  {
+    name: 'input-gst',
+    quick: true,
+    run(db) {
+      const { claimed } = db
+        .prepare(
+          `SELECT COALESCE((SELECT SUM(p.cgst_total + p.sgst_total + p.igst_total) FROM purchases p
+                            WHERE p.itc_claimed = 1 AND NOT EXISTS (SELECT 1 FROM purchase_cancellations c WHERE c.purchase_id = p.id)), 0)
+                - COALESCE((SELECT SUM(d.cgst_total + d.sgst_total + d.igst_total) FROM debit_notes d
+                            JOIN purchases p ON p.id = d.purchase_id WHERE p.itc_claimed = 1), 0) AS claimed`,
+        )
+        .get() as { claimed: number };
+      const { ledger } = db
+        .prepare(
+          `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS ledger FROM ledger_entries l
+           JOIN accounts a ON a.id = l.account_id WHERE a.code = 'INPUT_GST'`,
+        )
+        .get() as { ledger: number };
+      return claimed === ledger
+        ? []
+        : [issue('input-gst', 'Input GST in the ledger does not match the GST on purchase bills and returns.', { claimed, ledger })];
+    },
+  },
+  {
+    name: 'expense-ledger',
+    quick: true,
+    run(db) {
+      const { recorded } = db.prepare("SELECT COALESCE(SUM(amount), 0) AS recorded FROM expenses WHERE status = 'ACTIVE'").get() as { recorded: number };
+      const { ledger } = db
+        .prepare(
+          `SELECT COALESCE(SUM(l.debit - l.credit), 0) AS ledger FROM ledger_entries l
+           JOIN accounts a ON a.id = l.account_id WHERE a.code = 'OPERATING_EXPENSES'`,
+        )
+        .get() as { ledger: number };
+      return recorded === ledger
+        ? []
+        : [issue('expense-ledger', 'Recorded expenses do not match the expense account in the ledger.', { recorded, ledger })];
+    },
+  },
+  {
+    name: 'audit-trail',
+    quick: false,
+    run(db) {
+      // Every recorded document was written together with its history entry (same transaction).
+      const issues: IntegrityIssue[] = [];
+      for (const [table, label, entityType] of AUDITED_TABLES) {
+        if (!tableExists(db, table)) continue;
+        const match = entityType ? `a.entity_type = '${entityType}' AND a.entity_id = CAST(t.id AS TEXT)` : 'a.txn_ref = t.txn_ref';
+        const rows = db.prepare(`SELECT t.id FROM ${table} t WHERE NOT EXISTS (SELECT 1 FROM audit_log a WHERE ${match}) LIMIT 20`).all() as { id: number }[];
+        if (rows.length) issues.push(issue('audit-trail', `${rows.length}${rows.length === 20 ? '+' : ''} ${label} have no history entry.`, { table, ids: rows.map((r) => r.id) }));
+      }
+      return issues;
+    },
+  },
+  {
+    name: 'ledger-trail',
+    quick: false,
+    run(db) {
+      // Every document that moves money or stock value has its accounting entries.
+      const issues: IntegrityIssue[] = [];
+      for (const [label, sql] of LEDGER_DOCUMENTS) {
+        const rows = db.prepare(`${sql} LIMIT 20`).all() as { id: number }[];
+        if (rows.length) issues.push(issue('ledger-trail', `${rows.length}${rows.length === 20 ? '+' : ''} ${label} have no accounting entries.`, { ids: rows.map((r) => r.id) }));
+      }
+      return issues;
+    },
+  },
+  {
     name: 'settings',
     quick: true,
     run(db) {
@@ -309,9 +489,11 @@ const checks: IntegrityCheck[] = [
   },
 ];
 
-export function runIntegrityChecks(db: Db, opts: { quickOnly?: boolean } = {}): IntegrityReport {
+export const INTEGRITY_CHECKS = (): { name: string; quick: boolean }[] => checks.map((c) => ({ name: c.name, quick: c.quick }));
+
+export function runIntegrityChecks(db: Db, opts: { quickOnly?: boolean; only?: string[] } = {}): IntegrityReport {
   const started = Date.now();
-  const selected = checks.filter((c) => (opts.quickOnly ? c.quick : c.name !== 'sqlite-quick-check'));
+  const selected = checks.filter((c) => (opts.only ? opts.only.includes(c.name) : opts.quickOnly ? c.quick : c.name !== 'sqlite-quick-check'));
   const issues: IntegrityIssue[] = [];
   for (const check of selected) {
     try {

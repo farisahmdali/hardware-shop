@@ -37,12 +37,12 @@ export function useCommandQuery<K extends CommandName>(
 
 /**
  * A mutation that, once it has committed, refreshes every query whose command name
- * starts with one of `invalidate` (e.g. 'settings.' or 'backup.list'). The history
- * is always refreshed, because every change writes to it.
+ * starts with one of `invalidate` (e.g. 'settings.' or 'backup.list'). The history,
+ * dashboard and reports are always refreshed, because every change can affect them.
  */
 export function useCommandMutation<K extends CommandName>(name: K, opts: { invalidate?: string[] } = {}) {
   const qc = useQueryClient();
-  const prefixes = ['audit.', ...(opts.invalidate ?? [])];
+  const prefixes = ['audit.', 'dashboard.', 'reports.', ...(opts.invalidate ?? [])];
   return useMutation<CommandOutput<K>, ApiError, CommandInput<K>>({
     mutationFn: (input) => call(name, input),
     onSettled: async () => {

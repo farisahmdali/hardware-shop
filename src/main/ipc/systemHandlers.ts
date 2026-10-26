@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { parse, resolve } from 'node:path';
-import type { HandlerMap } from './dispatcher';
+import type { HandlerContext, HandlerMap } from './dispatcher';
 import { transact } from '../db/tx';
 import { schemaVersion } from '../db/migrator';
 import {
@@ -20,10 +21,12 @@ import {
 } from '../services/auth';
 import { getAllSettings, updateSettingsSection } from '../services/settings';
 import { auditFacets, listAudit } from '../services/audit';
-import { backupDirectory, copyLatestBackupTo, createBackup, listBackups, validateBackupFile } from '../services/backup';
+import { backupDirectory, copyLatestBackupTo, createBackup, listBackups, restoreBackup, validateBackupFile } from '../services/backup';
+import { lastSuccessfulBackupAt, nextBackupAt } from '../services/backupSchedule';
 import { runIntegrityChecks } from '../services/integrity';
 import { AppError, ErrorCodes } from '@shared/errors';
 import { settingsSchemas } from '@shared/settings';
+import type { IntegrityReport } from '@shared/contracts';
 
 /** Native dialogs and shell access, provided by the Electron layer. */
 export interface DesktopUi {
@@ -36,9 +39,55 @@ export interface DesktopUi {
 export interface SystemInfo {
   isPackaged: boolean;
   startupWarnings: () => string[];
+  /** The data checks, run off the main thread; in-process when not given (tests). */
+  checks?(opts: { quickOnly?: boolean }): Promise<IntegrityReport>;
+  /**
+   * Around a restore: stop whatever holds the database open, then pick up the (restored or,
+   * after a failure, reopened original) connection and refresh the screens.
+   */
+  restore?: { beforeSwap(): Promise<void>; afterRestore(restored: boolean): void };
 }
 
+const RESTORE_TOKEN_MS = 15 * 60_000;
+
 export function systemHandlers(ui: DesktopUi, info: SystemInfo): HandlerMap {
+  // Files chosen and checked for restoring. The renderer only ever holds a token, never a path.
+  const candidates = new Map<string, { path: string; senderId: number; expires: number }>();
+  const offer = async (path: string, ctx: HandlerContext) => {
+    const validation = await validateBackupFile(path, ctx.env);
+    const token = randomUUID();
+    if (validation.valid) candidates.set(token, { path, senderId: ctx.senderId, expires: Date.now() + RESTORE_TOKEN_MS });
+    return { token, validation };
+  };
+  const chooseAndOffer = async (ctx: HandlerContext) => {
+    const file = await ui.chooseFile('Choose the backup to restore', [{ name: 'Shop backups', extensions: ['db'] }]);
+    return file ? offer(file, ctx) : null;
+  };
+  const restore = async (token: string, ctx: HandlerContext) => {
+    const candidate = candidates.get(token);
+    if (!candidate || candidate.senderId !== ctx.senderId || candidate.expires < Date.now()) {
+      throw new AppError(ErrorCodes.VALIDATION, 'Choose and check the backup again before restoring.');
+    }
+    candidates.delete(token);
+    try {
+      const summary = await restoreBackup(ctx.env, ctx.actor, candidate.path, {
+        beforeSwap: info.restore?.beforeSwap ?? (async () => {}),
+        checks: info.checks && (() => info.checks!({})),
+      });
+      info.restore?.afterRestore(true);
+      return summary;
+    } catch (e) {
+      info.restore?.afterRestore(false);
+      throw e;
+    }
+  };
+  // Restoring without signing in is only for a new installation, before the shop has been set up.
+  const assertNotSetUp = (ctx: HandlerContext) => {
+    if (isSetupComplete(ctx.env.db)) {
+      throw new AppError(ErrorCodes.PERMISSION_DENIED, 'The shop is already set up. An owner can restore from Backup & Settings.', { permission: 'restore before setup' });
+    }
+  };
+
   return {
     'app.status': {
       access: 'public',
@@ -141,10 +190,14 @@ export function systemHandlers(ui: DesktopUi, info: SystemInfo): HandlerMap {
       handle: (_i, { env }) => {
         const folder = backupDirectory(env);
         const drive = (p: string) => parse(resolve(p)).root.toLowerCase();
+        const settings = getAllSettings(env.db).backup;
+        const last = lastSuccessfulBackupAt(env);
         return {
           folder,
-          isDefaultFolder: getAllSettings(env.db).backup.folder === null,
+          isDefaultFolder: settings.folder === null,
           sameDriveAsData: drive(folder) === drive(env.paths.dataDir),
+          lastSuccessAt: last,
+          nextAutoAt: nextBackupAt(env.clock.now(), last, settings, env.timeZone ?? 'Asia/Kolkata'),
         };
       },
     },
@@ -170,11 +223,36 @@ export function systemHandlers(ui: DesktopUi, info: SystemInfo): HandlerMap {
     },
     'backup.validateFile': {
       access: 'backup.create',
-      handle: async () => {
+      handle: async (_i, { env }) => {
         const file = await ui.chooseFile('Choose a backup file to check', [
           { name: 'Shop backups', extensions: ['db'] },
         ]);
-        return file ? validateBackupFile(file) : null;
+        return file ? validateBackupFile(file, env) : null;
+      },
+    },
+    'backup.restoreChoose': { access: 'backup.restore', handle: (_i, ctx) => chooseAndOffer(ctx) },
+    'backup.restoreCheck': {
+      access: 'backup.restore',
+      handle: async (input, ctx) => {
+        const row = listBackups(ctx.env, 5000).find((b) => b.id === input.id);
+        if (!row || row.status !== 'OK') throw new AppError(ErrorCodes.NOT_FOUND, 'That backup is not in the history.');
+        if (!row.fileExists) throw new AppError(ErrorCodes.NOT_FOUND, `The file ${row.fileName} is no longer in the backup folder.`);
+        return offer(row.filePath, ctx);
+      },
+    },
+    'backup.restore': { access: 'backup.restore', handle: (input, ctx) => restore(input.token, ctx) },
+    'setup.restoreChoose': {
+      access: 'public',
+      handle: (_i, ctx) => {
+        assertNotSetUp(ctx);
+        return chooseAndOffer(ctx);
+      },
+    },
+    'setup.restore': {
+      access: 'public',
+      handle: (input, ctx) => {
+        assertNotSetUp(ctx);
+        return restore(input.token, ctx);
       },
     },
     'backup.openFolder': {
@@ -185,6 +263,6 @@ export function systemHandlers(ui: DesktopUi, info: SystemInfo): HandlerMap {
       },
     },
 
-    'integrity.run': { access: 'settings.manage', handle: (_i, { env }) => runIntegrityChecks(env.db) },
+    'integrity.run': { access: 'settings.manage', handle: (_i, { env }) => (info.checks ? info.checks({}) : runIntegrityChecks(env.db)) },
   };
 }

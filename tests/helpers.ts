@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDatabase } from '@main/db/connection';
-import { migrate } from '@main/db/migrator';
+import { APPLICATION_ID, openDatabase, type Db } from '@main/db/connection';
+import { MIGRATIONS, migrate } from '@main/db/migrator';
 import type { Clock } from '@main/db/tx';
 import { silentLogger, type AppEnv } from '@main/services/env';
 import { completeSetup } from '@main/services/auth';
@@ -75,3 +75,28 @@ export function setupOwner(env: AppEnv): SessionInfo {
 }
 
 export const actorOf = (s: SessionInfo) => ({ userId: s.user.id, username: s.user.username });
+
+/** A database as an older release left it: migrations 1..version applied, the way migrate() applies them. */
+export function openDatabaseAtVersion(path: string, version: number): Db {
+  const db = openDatabase(path);
+  db.pragma(`application_id = ${APPLICATION_ID}`);
+  db.exec('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)');
+  for (const m of MIGRATIONS.slice(0, version)) {
+    db.transaction(() => {
+      db.exec(m.sql);
+      db.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?, ?)').run(m.version, m.name, m.checksum, '2026-01-01T00:00:00.000Z');
+      db.pragma(`user_version = ${m.version}`);
+    }).immediate();
+  }
+  return db;
+}
+
+/** Every row of every table, for comparing a database before and after an operation. */
+export function snapshotTables(db: Db, except: string[] = []): Record<string, unknown[]> {
+  const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[])
+    .map((t) => t.name)
+    .filter((t) => !except.includes(t) && !t.includes('_fts'));
+  // Sorted in JavaScript: some tables have no rowid.
+  const rows = (t: string) => db.prepare(`SELECT * FROM "${t}"`).all().map((r) => JSON.stringify(r)).sort();
+  return Object.fromEntries(tables.map((t) => [t, rows(t)]));
+}

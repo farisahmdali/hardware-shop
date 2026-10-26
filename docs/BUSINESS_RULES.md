@@ -32,7 +32,7 @@ These rules decide how money, tax, stock and rentals behave. A rule marked *(set
 | 14 | Editing a product's price never changes past invoices, which keep their own copies of name, code, price and tax. Every price change is recorded in the product's history as a **Price change** with old and new values. | 2 |
 | 14a | Stock balances are changed **only** by stock movements. The database rejects a movement that does not start from the current balance, and rejects any direct edit of a balance. | 2 |
 | 14b | Incoming stock without a known cost (e.g. a correction) comes in at the current average cost. When stock reaches exactly zero, all remaining value is removed. After an authorised negative balance, the next receipt resets the average to the incoming cost. | 2 |
-| 14c | Corrections, damage and loss need a reason. Stock received without a purchase bill is valued at the cost entered (default: purchase price) and is credited to owner equity; supplier bills should be entered as purchases once that module is available. | 2 |
+| 14c | Corrections, damage and loss need a reason. Stock received without a purchase bill is valued at the cost entered (default: purchase price) and is credited to owner equity. Bills from suppliers are entered as purchases instead (rule 32), so the supplier is owed the amount. | 2 |
 | 14d | A stock count compares each counted quantity with the stock **at the moment the count is finalized**, so sales can continue while counting. Products not counted are left unchanged. A finalized count cannot be edited. | 2 |
 | 14e | Every inventory value change is posted to the double-entry ledger, so the inventory account always equals the total stock value. Data health checks this. | 2 |
 | 14f | Purchase prices, average cost and stock value are shown only to roles that manage products or stock, or that see financial reports. | 2 |
@@ -49,7 +49,11 @@ These rules decide how money, tax, stock and rentals behave. A rule marked *(set
 | 17b | A payment is reversed (e.g. a bounced cheque or failed UPI) with a reason. The bills it paid become open again and the original payment record is kept. A payment whose credit was refunded cannot be reversed until the refund is reversed. | 3 |
 | 18 | Products, customers, suppliers, rates, settings and expenses can be edited. Every edit records the before and after values, the user and an optional reason. Records that history refers to are deactivated, never deleted. | 1 (settings, users), 2–5 |
 | 19 | Customer and supplier balances are always calculated from ledger entries. No balance is a figure someone can type over. | 3 |
-| 20 | Every denied attempt to perform an action is recorded in the history. | 1 |
+| 20 | Every refused attempt is recorded in the history with the user and the permission it needed, whether refused at the door (a command the role does not allow) or inside a command (a discount above the role's limit, a report the role may not see). | 1, 7 |
+| 20a | The history can be searched by product, customer, supplier or rental item name or code, and by bill, receipt, purchase, credit or debit note, rental, expense, count or cash entry number, as well as by reason and recorded values. It can be narrowed by dates, module, action and user. | 7 |
+| 20b | A record's history includes the entries about records linked to it, e.g. a customer's history shows their payments. Every entry written in the same transaction can be shown together. | 7 |
+| 20c | The history exports to CSV and PDF exactly as filtered, newest 10,000 entries at most, oldest first. Each export is itself recorded. | 7 |
+| 20d | The full data check confirms that every finalized document (bills, cancellations, credit notes, payments and reversals, balance adjustments, stock movements, rentals, deposits, purchases, debit notes, cash entries and counts) has its history entry, and that every document that moves money or stock value has its accounting entries. | 7 |
 
 ## Customers and receivables
 
@@ -84,12 +88,44 @@ These rules decide how money, tax, stock and rentals behave. A rule marked *(set
 | 30a | On return, each unit's condition is recorded and the unit goes to available, awaiting inspection, damaged or maintenance. A damage charge needs a description. Every status change of a unit is kept in its history. | 4 |
 | 31 | A rental that also sells products creates a sales invoice and a linked rental agreement and rental invoice in one step: either all are saved or none. | 4 |
 
-## Purchases
+## Purchases and suppliers
 
 | # | Rule | Since |
 |---|---|---|
-| 32 | Recoverable input GST is kept out of inventory cost *(setting)*. Freight and other additional costs are spread across the purchase lines by value. | 5 |
-| 33 | A supplier return reduces stock at current average cost and credits the supplier at the agreed value. Any difference goes to the stock-adjustment account. | 5 |
+| 32 | A purchase copies the supplier's bill: their bill number and date, each item's quantity, rate, GST rate and discount, and any freight or other charges. Stock comes in at **landed cost**: each line's taxable value plus its share of the charges, spread by value (by quantity if everything was free). | 5 |
+| 32a | GST on a purchase is CGST + SGST from a supplier in the shop's state and IGST from another state. A supplier with no GSTIN cannot charge GST. The GST is **claimed** (kept out of stock cost and recorded as recoverable input GST) only when the shop is GST-registered, the supplier has a GSTIN and claiming is switched on *(setting)*. Otherwise the GST is part of the cost of the goods. | 5 |
+| 32b | The saved total must equal the calculated total. A round-off of up to ₹10 *(setting)* matches a supplier's rounded total. The same supplier bill number can be recorded only once per supplier (unless that purchase was cancelled). A bill cannot be dated in the future. | 5 |
+| 32c | Saving a purchase sets each product's purchase price to its new landed cost per unit (can be switched off per bill). The change is recorded in the product's history. | 5 |
+| 32d | A supplier's bill falls due after their credit period *(setting, default 30 days; per-supplier override)*. | 5 |
+| 32e | A payment to a supplier settles the chosen bill first, then the oldest open bills. Anything extra stays as an **advance**, which, like an unused debit note, settles the supplier's next bill automatically. A supplier can refund an advance. A payment or refund can be reversed with a reason; the bills it paid become open again. | 5 |
+| 32f | Purchases are never edited. A bill entered by mistake is **cancelled** with a reason: the stock comes back out, the amount owed and any claimed input GST are reversed, and payments made against it become an advance. If nothing else has happened to a product since, its stock value is restored exactly; otherwise the stock leaves at the current average cost and the difference goes to stock adjustments. Cancelling is refused when some of the stock has been sold or goods were already returned against the bill. | 5 |
+| 33 | Goods returned to a supplier get a **debit note**. The supplier is credited each line's share of what the bill charged, including discount and GST, so returns in parts add up exactly; the share of freight is not credited. Stock leaves at the current average cost and any difference goes to stock adjustments. Claimed input GST on the returned goods is reversed. The credit first reduces what is owed on that bill; the rest settles other bills or stays as an advance, or the supplier refunds it. | 5 |
+| 33a | Supplier balances are calculated from the ledger: what the shop owes = open bills − advances and unused debit notes. Data health checks this for every supplier, and checks that recorded input GST matches the bills and returns. | 5 |
+| 33b | Purchase bills, supplier balances and supplier payments are shown only to roles that record purchases, pay suppliers or see financial reports. Supplier opening balances and corrections need their own permission. | 5 |
+
+## Expenses and cash
+
+| # | Rule | Since |
+|---|---|---|
+| 33c | An expense records the category, amount, the date it was paid and how. It appears on that date in the accounts and the cash book. It cannot be dated in the future. | 5 |
+| 33d | An expense can be **corrected** with a reason. When the amount, date or method changes, the original entry is reversed and the corrected one posted, each on its own date, and the history keeps both versions. An expense recorded by mistake is **voided**: it stays on record marked void and its entry is reversed. Expenses are never deleted. Data health checks that recorded expenses match the expense account. | 5 |
+| 33e | Cash moved in or out of the drawer for other reasons is a **cash entry**: cash added by the owner, owner drawings, bank deposits and bank withdrawals, each with a reason. An entry cannot take out more cash than the records show. Entries are reversed with a reason, never edited or deleted. | 5 |
+| 33f | The **cash book** for a day is worked out from the ledger: opening cash (the end of the previous day), money in and out by kind, and the cash that should be in the drawer. UPI, card, bank and cheque movements that day are shown separately for reference. | 5 |
+| 33g | A **cash count** is compared with what the records expect at that moment. A difference needs an explanation and is posted to cash over / short, so the expected cash matches the count from then on. Counts are kept as they were recorded. | 5 |
+
+## Reports and dashboard
+
+| # | Rule | Since |
+|---|---|---|
+| 33h | Every report and dashboard figure is worked out from the stored records when it is opened. Nothing is typed in or stored as a total. Reports only read; they run in a background worker on a read-only connection, so a long report never holds up billing. | 6 |
+| 33i | **Sales** are product sales invoices by invoice date, including GST, with cancelled invoices left out and returns subtracted on the day of the credit note. Rental bills are reported separately. Sales are not money collected and not profit. | 6 |
+| 33j | **Money collected** is payments received from customers, less payments reversed (on the day of the reversal). Refunds and rental security deposits are shown separately. | 6 |
+| 33k | The **income and profit summary** follows the accounts: revenue excluding GST (product sales less returns, rental charges, late fees, damage charges), less cost of goods sold at weighted-average cost, gives gross profit; less operating expenses, stock write-offs, cash over/short, balance adjustments and round-off, gives an estimated net profit. Cancellations, returns and corrections count on the day they are made. | 6 |
+| 33l | Purchases are not costs in the profit figures: stock bought becomes cost of goods sold only when it is sold, so nothing is counted twice. GST collected and input GST are shown for reference, never as income or cost. Security deposits are a liability, never income. | 6 |
+| 33m | Stock valuation uses moving weighted-average cost and can be shown for any past date (the stock after the last movement on that date). Retail value at selling prices is shown only for comparison. Today's valuation equals the inventory account. | 6 |
+| 33n | Rental income is counted when billed, under the rental billing rule in force; rental utilisation is the time units were out on rent divided by units × the length of the period. | 6 |
+| 33o | Who sees which report: sales, stock quantities, rentals and customer reports need report access; purchase costs and stock value also need permission to see costs; supplier reports need the purchasing or supplier-payment permission; expense and cash reports need those permissions; profit, GST and the other money reports need the financial reports permission. A refused attempt is recorded in the history. | 6 |
+| 33p | A report shows at most 10,000 rows. When there are more it says so and asks for a shorter period or a filter; its totals then cover the rows shown. Exports (Excel, CSV, PDF) and printing contain exactly what the screen shows, and each export or print is recorded in the history. | 6 |
 
 ## Users and permissions
 
@@ -99,6 +135,19 @@ These rules decide how money, tax, stock and rentals behave. A rule marked *(set
 | 35 | Each role has a maximum discount percentage. | 1 (setting), 3 (enforced) |
 | 36 | PINs and passwords are stored only as salted scrypt hashes. Five wrong attempts lock the account for 5 minutes. | 1 |
 | 37 | The login screen can be switched off for a single-owner shop *(setting)*. Everything is then recorded as the owner. | 1 |
+
+## Backups and restore
+
+| # | Rule | Since |
+|---|---|---|
+| 38 | Automatic backups are taken while the application is open: at the first start of each day, then every few hours *(setting, default 4)*, counted from the last backup of any kind. A failed attempt is recorded and retried after half an hour. | 7 |
+| 39 | Retention: the newest automatic backups *(default 30)* and the newest automatic backup of each day *(default 90 days)* are kept; older automatic backups are deleted. Manual backups, backups made before an upgrade and before a restore are never deleted, nor is the newest backup that passed its check. The history entry of a deleted backup is kept and marked removed, and each clean-up is recorded. | 7 |
+| 40 | Restoring needs the restore permission (owner only by default) and the typed word RESTORE. The backup is checked first: a damaged, altered, foreign or newer-version file is refused and nothing changes. | 7 |
+| 41 | Before anything is replaced, a verified copy of the current data is saved (kind "before restore"). If that copy cannot be made, nothing is restored. | 7 |
+| 42 | A restore is all or nothing. The restored file is opened, upgraded if it comes from an older version, completed with the backups found in the backup folders, checked, and the restore recorded; if any step fails, or the application stops part way, the original data is put back. | 7 |
+| 43 | The restore is recorded in the restored data, naming the backup, the copy saved before it and the person who restored it. If that person's account did not exist yet when the backup was taken, the name is recorded without linking to an account. A refused or failed restore is recorded in the data that stays in use. | 7 |
+| 44 | After a restore everyone signs in again, because the accounts are those of the backup. | 7 |
+| 45 | On a new installation, before the shop is set up, a backup can be restored from the first screen without signing in (moving to a new computer). Once the shop is set up, restoring needs a signed-in user with the restore permission; an attempt to use the first-screen restore is refused and recorded. | 8 |
 
 ## Limits of protection
 

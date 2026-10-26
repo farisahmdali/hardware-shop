@@ -1,4 +1,5 @@
 import type { DbEnv } from '../db/tx';
+import type { DatabaseInspection } from '@shared/contracts';
 
 export interface AppPaths {
   dataDir: string;
@@ -19,4 +20,10 @@ export interface AppEnv extends DbEnv {
   paths: AppPaths;
   appVersion: string;
   logger: Logger;
+  /**
+   * Checks a whole database file (a backup being made or restored). On a large shop this takes
+   * many seconds, so the application runs it in the background worker; without it (tests, and
+   * the upgrade before the window opens) it runs here.
+   */
+  inspectFile?(path: string): Promise<DatabaseInspection>;
 }

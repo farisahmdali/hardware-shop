@@ -12,6 +12,7 @@ import { ConfirmDialog } from '../../components/ui/dialog';
 import { Input, Select } from '../../components/ui/form';
 import { Badge, EmptyState, Spinner } from '../../components/ui/layout';
 import { Pagination, Table, Td, Th, THead, Tr } from '../../components/ui/table';
+import { HistoryButton } from '../history/EntityHistory';
 
 /** Payments and refunds, with reversal for authorised users. */
 export function PaymentsTable({ customerId }: { customerId?: number }) {
@@ -110,7 +111,8 @@ export function PaymentsTable({ customerId }: { customerId?: number }) {
                     {p.direction === 'OUT' ? '− ' : ''}
                     {formatMoney(p.amount)}
                   </Td>
-                  <Td align="right">
+                  <Td align="right" className="whitespace-nowrap">
+                    <HistoryButton entityType="payment" entityId={p.id} title={`Receipt ${p.paymentNo}`} />
                     {!p.reversal && can('payments.reverse') && (
                       <Button size="sm" variant="ghost" onClick={() => setReversing(p)}>
                         Reverse

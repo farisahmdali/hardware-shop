@@ -134,7 +134,7 @@ test('products and stock: create, receive, damage, price change, import, export,
   await page.getByRole('link', { name: 'Data health' }).click();
   await page.getByRole('button', { name: 'Run full check' }).click();
   await expect(page.getByText('No problems found')).toBeVisible();
-  await expect(page.getByText(/inventory-ledger/)).toBeVisible();
+  await expect(page.getByText('Stock value matches the inventory account')).toBeVisible();
 
   await app.close();
 });

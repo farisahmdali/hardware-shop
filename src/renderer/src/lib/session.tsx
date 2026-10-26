@@ -20,6 +20,12 @@ export function useCanSeeCost(): boolean {
   return (['products.manage', 'stock.adjust', 'reports.financial'] as Permission[]).some((p) => s.permissions.includes(p));
 }
 
+/** Mirrors the main process rule for who may see purchase bills and supplier balances. */
+export function useCanViewPurchasing(): boolean {
+  const s = useSession();
+  return (['purchases.manage', 'suppliers.pay', 'reports.financial'] as Permission[]).some((p) => s.permissions.includes(p));
+}
+
 /** For hiding controls the user cannot use. The main process enforces permissions regardless. */
 export function useCan(): (permission: Permission) => boolean {
   const s = useSession();

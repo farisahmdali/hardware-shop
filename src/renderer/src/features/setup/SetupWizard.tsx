@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { Hammer, ShieldCheck, Store } from 'lucide-react';
+import { Hammer, RotateCcw, ShieldCheck, Store } from 'lucide-react';
 import { shopProfileSchema, type ShopProfile } from '@shared/settings';
 import { secretSchema } from '@shared/contracts';
 import { call, errorMessage } from '../../lib/api';
@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/button';
 import { Field, Input } from '../../components/ui/form';
 import { ErrorBanner } from '../../components/ui/layout';
 import { ShopProfileFields, type ShopProfileInput } from '../settings/ShopProfileFields';
+import { RestoreDialog, type RestoreCandidate } from '../settings/RestoreDialog';
 import { cn } from '../../lib/cn';
 
 const ownerSchema = z
@@ -34,7 +35,23 @@ export function SetupWizard() {
   const [shop, setShop] = useState<ShopProfile | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [candidate, setCandidate] = useState<RestoreCandidate | null>(null);
   const qc = useQueryClient();
+
+  // A new computer: start from the old one's backup instead of an empty shop.
+  const chooseBackup = async () => {
+    setChoosing(true);
+    setSubmitError(null);
+    try {
+      const result = await call('setup.restoreChoose');
+      if (result) setCandidate(result);
+    } catch (e) {
+      setSubmitError(errorMessage(e));
+    } finally {
+      setChoosing(false);
+    }
+  };
 
   const shopForm = useForm<ShopProfileInput, unknown, ShopProfile>({
     resolver: zodResolver(shopProfileSchema),
@@ -148,7 +165,23 @@ export function SetupWizard() {
             </form>
           )}
         </div>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-line bg-surface px-6 py-4">
+          <div>
+            <p className="font-medium text-ink">Moving from another computer?</p>
+            <p className="text-[13px] text-ink-2">Set the shop up from its backup instead. All records, history and user accounts come with it.</p>
+          </div>
+          <Button variant="outline" icon={<RotateCcw className="size-4" />} busy={choosing} onClick={chooseBackup}>
+            Restore from a backup…
+          </Button>
+        </div>
+        {submitError && step === 1 && (
+          <div className="mt-4">
+            <ErrorBanner title="Could not restore" message={submitError} />
+          </div>
+        )}
       </div>
+      {candidate && <RestoreDialog candidate={candidate} mode="setup" onClose={() => setCandidate(null)} />}
     </div>
   );
 }

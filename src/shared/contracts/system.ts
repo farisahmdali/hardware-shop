@@ -71,6 +71,13 @@ export interface AuditRow {
   relatedId: string | null;
 }
 
+export interface AuditFacets {
+  modules: string[];
+  actions: string[];
+  entityTypes: string[];
+  users: { id: number; name: string; username: string }[];
+}
+
 export interface BackupRecord {
   id: number;
   createdAt: string;
@@ -84,6 +91,18 @@ export interface BackupRecord {
   message: string | null;
   username: string | null;
   fileExists: boolean;
+  /** Set when the retention policy removed the file; the history entry is kept. */
+  removedAt: string | null;
+  removedReason: string | null;
+}
+
+export interface RestoreSummary {
+  restoredFrom: string;
+  backupCreatedAt: string | null;
+  /** The copy of the data as it was just before the restore. */
+  preRestoreBackup: string;
+  migrationsApplied: number[];
+  issues: IntegrityIssue[];
 }
 
 export type BackupKind = 'MANUAL' | 'AUTO' | 'PRE_RESTORE' | 'PRE_MIGRATION';
@@ -93,7 +112,13 @@ export interface BackupFolderInfo {
   isDefaultFolder: boolean;
   /** True when backups sit on the same drive as the live database (no protection against disk failure). */
   sameDriveAsData: boolean;
+  lastSuccessAt: string | null;
+  /** When the next automatic backup is due; null when automatic backups are off. */
+  nextAutoAt: string | null;
 }
+
+/** The result of checking a database file: damage, identity, version and contents. */
+export type DatabaseInspection = Pick<BackupValidation, 'valid' | 'problems' | 'schemaVersion' | 'shopName' | 'counts'>;
 
 export interface BackupValidation {
   filePath: string;
@@ -138,7 +163,22 @@ export const secretSchema = z
   .refine((v) => /^\d+$/.test(v) || v.length >= 6, 'Use a PIN of 4+ digits or a password of 6+ characters');
 
 const displayName = z.string().trim().min(1, 'Name is required').max(80);
+
+const auditFilter = z.object({
+  module: z.string().max(40).optional(),
+  entityType: z.string().max(40).optional(),
+  entityId: z.string().max(40).optional(),
+  /** A record and everything linked to it. */
+  record: z.object({ type: z.string().max(40), id: z.string().max(40) }).optional(),
+  action: z.string().max(60).optional(),
+  userId: z.number().int().positive().optional(),
+  txnRef: z.string().max(60).optional(),
+  from: z.string().max(40).optional(),
+  to: z.string().max(40).optional(),
+  search: z.string().trim().max(100).optional(),
+});
 const id = z.number().int().positive();
+const restoreInput = z.object({ token: z.string().uuid(), confirm: z.literal('RESTORE', { message: 'Type RESTORE to confirm' }) });
 const version = z.number().int().positive();
 const reason = z.string().trim().max(500).optional();
 
@@ -195,20 +235,14 @@ export const systemCommands = {
   'settings.update': command<AllSettings>()(settingsUpdateInput),
 
   'audit.list': command<Paged<AuditRow>>()(
-    z.object({
+    auditFilter.extend({
       page: z.number().int().min(1).default(1),
       pageSize: z.number().int().min(10).max(200).default(50),
-      module: z.string().optional(),
-      entityType: z.string().optional(),
-      entityId: z.string().optional(),
-      action: z.string().optional(),
-      userId: id.optional(),
-      from: z.string().optional(),
-      to: z.string().optional(),
-      search: z.string().trim().max(100).optional(),
     }),
   ),
-  'audit.facets': command<{ modules: string[]; actions: string[]; entityTypes: string[] }>()(z.object({})),
+  'audit.facets': command<AuditFacets>()(z.object({})),
+  /** CSV or PDF of the matching entries (the newest 10,000). */
+  'audit.export': command<{ path: string } | null>()(auditFilter.extend({ format: z.enum(['csv', 'pdf']) })),
 
   'backup.info': command<BackupFolderInfo>()(z.object({})),
   'backup.list': command<BackupRecord[]>()(z.object({})),
@@ -216,6 +250,14 @@ export const systemCommands = {
   'backup.chooseFolder': command<AllSettings | null>()(z.object({})),
   'backup.copyLatestTo': command<{ copiedTo: string } | null>()(z.object({})),
   'backup.validateFile': command<BackupValidation | null>()(z.object({})),
+  /** Choose a backup file to restore; returns its check and a token for 'backup.restore'. */
+  'backup.restoreChoose': command<{ token: string; validation: BackupValidation } | null>()(z.object({})),
+  /** Check a backup from the history for restoring; returns its check and a token. */
+  'backup.restoreCheck': command<{ token: string; validation: BackupValidation }>()(z.object({ id })),
+  'backup.restore': command<RestoreSummary>()(restoreInput),
+  /** First start on a new computer: choose a backup to set the shop up from, instead of the setup steps. */
+  'setup.restoreChoose': command<{ token: string; validation: BackupValidation } | null>()(z.object({})),
+  'setup.restore': command<RestoreSummary>()(restoreInput),
   'backup.openFolder': command<null>()(z.object({})),
 
   'integrity.run': command<IntegrityReport>()(z.object({})),

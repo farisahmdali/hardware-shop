@@ -15,6 +15,7 @@ import { Card, ErrorBanner, KeyValue, Spinner } from '../../components/ui/layout
 import { QtyInput, newRequestId } from '../../components/ui/numberInputs';
 import { Pagination, Table, Td, Th, THead, Tr } from '../../components/ui/table';
 import { countStatusBadge } from './StockCountsPage';
+import { HistoryButton } from '../history/EntityHistory';
 import { cn } from '../../lib/cn';
 
 const PAGE_SIZE = 50;
@@ -57,16 +58,19 @@ export function StockCountDetailPage() {
             {c.categoryName ?? 'All products'} · started {formatDateTime(c.startedAt)} by {c.startedBy}
           </p>
         </div>
-        {isOpen && (
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => setConfirm('cancel')}>
-              Cancel count
-            </Button>
-            <Button onClick={() => setConfirm('finalize')} disabled={c.countedCount === 0}>
-              Finalize count
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <HistoryButton entityType="stock_count" entityId={c.id} title={`Stock count ${c.countNo}`} />
+          {isOpen && (
+            <>
+              <Button variant="ghost" onClick={() => setConfirm('cancel')}>
+                Cancel count
+              </Button>
+              <Button onClick={() => setConfirm('finalize')} disabled={c.countedCount === 0}>
+                Finalize count
+              </Button>
+            </>
+          )}
+        </div>
       </header>
 
       <div className="mb-5 grid grid-cols-3 gap-4">

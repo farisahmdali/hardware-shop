@@ -4,12 +4,18 @@ import { systemCommands } from './system';
 import { inventoryCommands } from './inventory';
 import { salesCommands } from './sales';
 import { rentalCommands } from './rentals';
+import { purchaseCommands } from './purchases';
+import { expenseCommands } from './expenses';
+import { reportCommands } from './reports';
 
 export const contract = {
   ...systemCommands,
   ...inventoryCommands,
   ...salesCommands,
   ...rentalCommands,
+  ...purchaseCommands,
+  ...expenseCommands,
+  ...reportCommands,
 };
 
 export type Contract = typeof contract;
@@ -24,3 +30,6 @@ export * from './system';
 export * from './inventory';
 export * from './sales';
 export * from './rentals';
+export * from './purchases';
+export * from './expenses';
+export * from './reports';

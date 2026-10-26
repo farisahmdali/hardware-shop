@@ -10,6 +10,8 @@ export const DocTypes = {
   EXPENSE: { prefix: 'EXP', label: 'Expense' },
   STOCK_COUNT: { prefix: 'SC', label: 'Stock count' },
   REFUND: { prefix: 'RFD', label: 'Refund' },
+  SUPPLIER_REFUND: { prefix: 'SRF', label: 'Refund from supplier' },
+  CASH_ENTRY: { prefix: 'CSH', label: 'Cash entry' },
 } as const;
 
 export type DocType = keyof typeof DocTypes;

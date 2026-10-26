@@ -204,6 +204,8 @@ export interface RentalSummary {
   unitsOut: number;
   unitsAvailable: number;
   awaitingInspection: number;
+  /** Rental bills customers still owe. */
+  chargesUnpaid: number;
 }
 
 // ---------- Input schemas ----------

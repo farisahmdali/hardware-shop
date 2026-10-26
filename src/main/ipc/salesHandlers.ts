@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import type { HandlerContext, HandlerMap } from './dispatcher';
 import type { DesktopUi } from './systemHandlers';
 import { canSeeCost } from './inventoryHandlers';
+import { canViewPurchasing } from './purchaseHandlers';
 import { transact } from '../db/tx';
 import { adjustBalance, createCustomer, customerLedger, getCustomer, listCustomers, setCustomerActive, updateCustomer } from '../services/customers';
 import { cancelInvoice, createCreditNote, finalizeSale, getInvoice, listInvoices, salesSummary } from '../services/sales';
@@ -27,14 +28,18 @@ import type { DocumentKind, Paper } from '@shared/contracts';
 /** Printing needs Electron windows; injected so the handlers stay testable. */
 export interface Printer {
   toPdf(html: string, paper: Paper): Promise<Buffer>;
-  print(html: string, paper: Paper): Promise<boolean>;
+  print(html: string, paper: Paper, opts?: { landscape?: boolean }): Promise<boolean>;
 }
 
 const asOf = (ctx: HandlerContext) => businessDateOf(ctx.env.clock.now(), ctx.env.timeZone);
 
 export function salesHandlers(ui: DesktopUi, printer: Printer): HandlerMap {
-  const render = (ctx: HandlerContext, input: { kind: DocumentKind; id: number; paper: Paper; from?: string; to?: string }) =>
-    renderDocument(ctx.env.db, input.kind, input.id, input.paper, asOf(ctx), { from: input.from, to: input.to });
+  const render = (ctx: HandlerContext, input: { kind: DocumentKind; id: number; paper: Paper; from?: string; to?: string }) => {
+    if ((input.kind === 'DEBIT_NOTE' || input.kind === 'SUPPLIER_STATEMENT') && !canViewPurchasing(ctx.session)) {
+      throw new AppError(ErrorCodes.PERMISSION_DENIED, 'You do not have permission to see purchases and supplier balances.');
+    }
+    return renderDocument(ctx.env.db, input.kind, input.id, input.paper, asOf(ctx), { from: input.from, to: input.to });
+  };
 
   return {
     'customers.list': { access: 'authenticated', handle: (input, ctx) => listCustomers(ctx.env.db, input, asOf(ctx)) },

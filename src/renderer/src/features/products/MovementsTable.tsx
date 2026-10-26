@@ -120,6 +120,16 @@ export function MovementsTable({ productId }: { productId?: number }) {
                         (view count)
                       </Link>
                     )}
+                    {m.refType === 'INVOICE' && (
+                      <Link to={`/sales/invoices/${m.refId}`} className="ml-1 text-brand hover:underline">
+                        (view invoice)
+                      </Link>
+                    )}
+                    {m.refType === 'PURCHASE' && (
+                      <Link to={`/suppliers/purchases/${m.refId}`} className="ml-1 text-brand hover:underline">
+                        (view purchase)
+                      </Link>
+                    )}
                   </Td>
                   <Td className="whitespace-nowrap">{m.username ?? 'system'}</Td>
                 </Tr>

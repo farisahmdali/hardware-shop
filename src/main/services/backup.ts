@@ -1,16 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
-import { APPLICATION_ID, tableExists } from '../db/connection';
-import { LATEST_SCHEMA_VERSION, pendingMigrations, schemaVersion } from '../db/migrator';
+import { APPLICATION_ID, openDatabase, tableExists } from '../db/connection';
+import { LATEST_SCHEMA_VERSION, migrate, pendingMigrations, schemaVersion } from '../db/migrator';
 import { transact, type Actor } from '../db/tx';
-import type { AppEnv } from './env';
+import type { AppEnv, Logger } from './env';
+import { runIntegrityChecks } from './integrity';
+import { backupsToRemove } from './backupSchedule';
 import { getAllSettings } from './settings';
 import { AppError, ErrorCodes } from '@shared/errors';
-import type { BackupKind, BackupRecord, BackupValidation } from '@shared/contracts';
+import type { BackupKind, BackupRecord, BackupValidation, DatabaseInspection, IntegrityReport, RestoreSummary } from '@shared/contracts';
 import { DEFAULT_TIMEZONE } from '@shared/time';
 
 const MANIFEST_FORMAT = 'hardware-shop-backup';
@@ -89,7 +91,7 @@ function countRows(db: Database.Database): Record<string, number> {
  * Inspects a database file this process controls (it may be opened read-write).
  * Never call this on a user-selected file directly; use validateBackupFile, which works on a copy.
  */
-function inspectDatabase(path: string): Omit<BackupValidation, 'filePath' | 'sizeBytes' | 'createdAt' | 'appVersion'> {
+export function inspectDatabase(path: string): DatabaseInspection {
   const problems: string[] = [];
   let db: Database.Database | null = null;
   try {
@@ -155,7 +157,10 @@ async function readManifest(dbPath: string): Promise<BackupManifest | null> {
  * Validates any backup file without touching it: the file is copied to a private
  * temporary location and every check runs against the copy.
  */
-export async function validateBackupFile(filePath: string): Promise<BackupValidation> {
+const inspect = (env: AppEnv | undefined, path: string): Promise<DatabaseInspection> =>
+  env?.inspectFile ? env.inspectFile(path) : Promise.resolve(inspectDatabase(path));
+
+export async function validateBackupFile(filePath: string, env?: AppEnv): Promise<BackupValidation> {
   const base: BackupValidation = {
     filePath,
     valid: false,
@@ -190,7 +195,7 @@ export async function validateBackupFile(filePath: string): Promise<BackupValida
   const copy = join(workDir, 'candidate.db');
   try {
     await copyFile(filePath, copy);
-    const inspected = inspectDatabase(copy);
+    const inspected = await inspect(env, copy);
     return {
       ...base,
       ...inspected,
@@ -216,6 +221,8 @@ interface BackupHistoryRecord {
   status: 'OK' | 'FAILED';
   message: string | null;
   username: string | null;
+  removed_at: string | null;
+  removed_reason: string | null;
 }
 
 function toRecord(r: BackupHistoryRecord): BackupRecord {
@@ -232,6 +239,8 @@ function toRecord(r: BackupHistoryRecord): BackupRecord {
     message: r.message,
     username: r.username,
     fileExists: existsSync(r.file_path),
+    removedAt: r.removed_at,
+    removedReason: r.removed_reason,
   };
 }
 
@@ -304,7 +313,7 @@ export async function createBackup(env: AppEnv, actor: Actor, kind: BackupKind, 
     copy.pragma('journal_mode = DELETE');
     copy.close();
 
-    const inspected = inspectDatabase(partialPath);
+    const inspected = await inspect(env, partialPath);
     if (!inspected.valid) throw new Error(`Verification failed: ${inspected.problems.join(' ')}`);
 
     const sha256 = await sha256File(partialPath);
@@ -338,6 +347,37 @@ export async function createBackup(env: AppEnv, actor: Actor, kind: BackupKind, 
   }
 }
 
+/**
+ * Removes what a backup interrupted by a crash or power cut leaves in the backup folder: the
+ * unfinished `.partial` copy (and its SQLite side files) and a manifest whose backup never got its
+ * final name. Finished backups are never touched. Returns the names removed.
+ */
+export async function removeInterruptedBackups(env: AppEnv): Promise<string[]> {
+  const dir = backupDirectory(env);
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const name of names) {
+    const lower = name.toLowerCase();
+    const stray =
+      /\.db\.partial(-journal|-wal|-shm)?$/.test(lower) ||
+      (lower.startsWith('hardwareshop_') && lower.endsWith('.json') && !existsSync(join(dir, name.replace(/\.json$/i, '.db'))));
+    if (!stray) continue;
+    try {
+      await rm(join(dir, name), { force: true });
+      removed.push(name);
+    } catch (e) {
+      env.logger.warn(`Could not remove ${name} left by an interrupted backup: ${(e as Error).message}`);
+    }
+  }
+  if (removed.length) env.logger.warn(`Removed files left by an interrupted backup: ${removed.join(', ')}`);
+  return removed;
+}
+
 /** Copies the newest verified backup (and its manifest) to another folder, e.g. a USB drive, and re-verifies the copy. */
 export async function copyLatestBackupTo(env: AppEnv, actor: Actor, destDir: string): Promise<string> {
   const latest = listBackups(env).find((b) => b.status === 'OK' && b.fileExists);
@@ -362,4 +402,191 @@ export async function copyLatestBackupTo(env: AppEnv, actor: Actor, destDir: str
     }),
   );
   return dest;
+}
+
+// ---------- Retention ----------
+
+/**
+ * Removes automatic backups the retention policy no longer needs (see backupsToRemove). The
+ * history entry of each removed file is kept, marked removed, and the removal is recorded.
+ */
+export async function pruneBackups(env: AppEnv, actor: Actor): Promise<string[]> {
+  const settings = getAllSettings(env.db).backup;
+  const rows = listBackups(env, 5000);
+  const ids = new Set(backupsToRemove(rows, env.clock.now(), settings, env.timeZone ?? DEFAULT_TIMEZONE));
+  const removed: string[] = [];
+  for (const b of rows.filter((r) => ids.has(r.id))) {
+    try {
+      await rm(b.filePath, { force: true });
+      await rm(b.filePath.replace(/\.db$/, '.json'), { force: true });
+      removed.push(b.fileName);
+      transact(env, actor, (tx) =>
+        tx.db
+          .prepare('UPDATE backup_history SET removed_at = ?, removed_reason = ? WHERE id = ?')
+          .run(tx.nowIso, `Older than the retention policy keeps (${settings.keepAutoCount} latest, one a day for ${settings.keepDailyDays} days)`, b.id),
+      );
+    } catch (e) {
+      env.logger.warn(`Could not remove old backup ${b.filePath}: ${(e as Error).message}`);
+    }
+  }
+  if (removed.length) {
+    transact(env, actor, (tx) => tx.audit({ module: 'backup', entityType: 'backup', action: 'BACKUP_PRUNED', after: { files: removed, count: removed.length } }));
+  }
+  return removed;
+}
+
+// ---------- Restore ----------
+
+/**
+ * Adds to the backup history any verified backup found in these folders that the history does not
+ * list, e.g. backups made after the moment a restored backup was taken, including the copy made just
+ * before the restore.
+ */
+export async function reconcileBackupHistory(env: AppEnv, folders: string[]): Promise<number> {
+  let added = 0;
+  const known = new Set((env.db.prepare('SELECT file_path FROM backup_history').all() as { file_path: string }[]).map((r) => r.file_path.toLowerCase()));
+  for (const folder of [...new Set(folders)]) {
+    let names: string[];
+    try {
+      names = await readdir(folder);
+    } catch {
+      continue;
+    }
+    for (const name of names.filter((n) => n.toLowerCase().endsWith('.json'))) {
+      const dbPath = join(folder, name.replace(/\.json$/i, '.db'));
+      if (known.has(dbPath.toLowerCase()) || !existsSync(dbPath)) continue;
+      const manifest = await readManifest(dbPath);
+      if (!manifest) continue;
+      env.db
+        .prepare(
+          `INSERT INTO backup_history (created_at, kind, file_name, file_path, size_bytes, sha256, schema_version, status, message)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'OK', ?)`,
+        )
+        .run(manifest.createdAt, manifest.kind, basename(dbPath), dbPath, manifest.sizeBytes, manifest.sha256, manifest.schemaVersion, 'Found in the backup folder after a restore');
+      known.add(dbPath.toLowerCase());
+      added++;
+    }
+  }
+  return added;
+}
+
+const stagedPath = (dbPath: string) => `${dbPath}.restoring`;
+const previousPath = (dbPath: string) => `${dbPath}.before-restore`;
+
+async function removeSideFiles(dbPath: string): Promise<void> {
+  await rm(`${dbPath}-wal`, { force: true });
+  await rm(`${dbPath}-shm`, { force: true });
+}
+
+/**
+ * Replaces the shop data with a backup:
+ *  1. the backup is validated (a damaged, foreign or newer-version file is refused);
+ *  2. a verified copy of the current data is saved first; if that fails nothing is restored;
+ *  3. the backup is copied next to the database and checked against the original;
+ *  4. the database is closed and the files swapped; the old file is kept beside it until the end;
+ *  5. the restored database is opened, upgraded if it is from an older version, and checked;
+ *  6. the backup history is completed from the backup folders and the restore is recorded.
+ * The restore is all or nothing: if any of steps 4-6 fails, or the application stops part way,
+ * the original database is put back (see recoverInterruptedRestore).
+ */
+export async function restoreBackup(
+  env: AppEnv,
+  actor: Actor,
+  filePath: string,
+  hooks: { beforeSwap(): Promise<void>; /** The data checks off the main thread, on the restored file. */ checks?(): Promise<IntegrityReport> },
+): Promise<RestoreSummary> {
+  // A refused or failed attempt is recorded in the data that stays in use.
+  const refuse = (error: AppError): AppError => {
+    try {
+      transact(env, actor, (tx) =>
+        tx.audit({ module: 'backup', entityType: 'backup', action: 'RESTORE_FAILED', after: { fileName: basename(filePath), folder: dirname(filePath), problem: error.message } }),
+      );
+    } catch (e) {
+      env.logger.error('Could not record the failed restore', e);
+    }
+    return error;
+  };
+
+  const validation = await validateBackupFile(filePath, env);
+  if (!validation.valid) {
+    throw refuse(new AppError(ErrorCodes.BACKUP_INVALID, `This backup cannot be restored: ${validation.problems.join(' ')}`, { problems: validation.problems }));
+  }
+  let pre: BackupRecord;
+  try {
+    pre = await createBackup(env, actor, 'PRE_RESTORE');
+  } catch (e) {
+    throw refuse(new AppError(ErrorCodes.IO, `Nothing was restored, because a copy of the current data could not be saved first. ${(e as Error).message}`));
+  }
+
+  const dbPath = env.paths.databasePath;
+  const staged = stagedPath(dbPath);
+  const previous = previousPath(dbPath);
+  await rm(staged, { force: true });
+  await copyFile(filePath, staged);
+  if ((await sha256File(staged)) !== (await sha256File(filePath))) {
+    await rm(staged, { force: true });
+    throw refuse(new AppError(ErrorCodes.IO, 'The backup could not be copied correctly. Nothing was restored.'));
+  }
+
+  await hooks.beforeSwap();
+  env.db.close();
+  await removeSideFiles(dbPath);
+  await rm(previous, { force: true });
+  await rename(dbPath, previous);
+  let summary: RestoreSummary;
+  try {
+    await rename(staged, dbPath);
+    env.db = openDatabase(dbPath);
+    const migrationsApplied = migrate(env.db);
+    await reconcileBackupHistory(env, [dirname(pre.filePath), backupDirectory(env)]);
+    const issues = (hooks.checks ? await hooks.checks() : runIntegrityChecks(env.db)).issues;
+    // The person restoring may not exist in the restored data (added after the backup was taken).
+    const sameUser =
+      actor.userId !== null && !!env.db.prepare('SELECT 1 FROM users WHERE id = ? AND username = ? COLLATE NOCASE').get(actor.userId, actor.username);
+    transact(env, sameUser ? actor : { userId: null, username: actor.username }, (tx) =>
+      tx.audit({
+        module: 'backup',
+        entityType: 'backup',
+        action: 'BACKUP_RESTORED',
+        after: {
+          fileName: basename(filePath),
+          folder: dirname(filePath),
+          backupCreatedAt: validation.createdAt,
+          preRestoreBackup: pre.fileName,
+          schemaVersion: validation.schemaVersion,
+          migrationsApplied,
+          problemsFound: issues.length,
+        },
+      }),
+    );
+    summary = { restoredFrom: filePath, backupCreatedAt: validation.createdAt, preRestoreBackup: pre.filePath, migrationsApplied, issues };
+  } catch (e) {
+    env.logger.error('Restore failed; putting the original database back', e);
+    if (env.db.open) env.db.close();
+    await rm(dbPath, { force: true });
+    await removeSideFiles(dbPath);
+    await rename(previous, dbPath);
+    env.db = openDatabase(dbPath);
+    throw refuse(new AppError(ErrorCodes.IO, `The backup could not be restored, so your current data was put back unchanged. ${(e as Error).message}`));
+  }
+  // Only now is the restore complete; until here a restart would put the original back.
+  await rm(previous, { force: true });
+  env.logger.info(`Restored ${filePath}; previous data saved as ${pre.filePath}`);
+  return summary;
+}
+
+/**
+ * At startup: if the application stopped part way through a restore, the original database is
+ * still beside the data file, so the restore did not finish (and was not recorded). Put the
+ * original back. Leftover staging files are removed.
+ */
+export async function recoverInterruptedRestore(dbPath: string, logger: Logger): Promise<void> {
+  const previous = previousPath(dbPath);
+  if (existsSync(previous)) {
+    await rm(dbPath, { force: true });
+    await removeSideFiles(dbPath);
+    await rename(previous, dbPath);
+    logger.warn('A restore was interrupted; the original database was put back.');
+  }
+  await rm(stagedPath(dbPath), { force: true });
 }

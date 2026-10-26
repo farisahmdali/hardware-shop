@@ -53,14 +53,14 @@ export async function htmlToPdf(html: string, paper: Paper): Promise<Buffer> {
 }
 
 /** Opens the Windows print dialog for the document. Resolves false if the user cancels. */
-export async function printHtml(html: string, paper: Paper): Promise<boolean> {
+export async function printHtml(html: string, paper: Paper, opts: { landscape?: boolean } = {}): Promise<boolean> {
   return withDocument(html, async (win) => {
     const pageSize =
       paper === 'A4'
         ? ('A4' as const)
         : { width: thermalWidthMm(paper) * 1000, height: Math.round((await contentHeightInches(win)) * MM_PER_INCH * 1000) };
     return new Promise<boolean>((resolve) => {
-      win.webContents.print({ silent: false, printBackground: true, pageSize, margins: { marginType: 'none' } }, (success) =>
+      win.webContents.print({ silent: false, printBackground: true, pageSize, landscape: opts.landscape ?? false, margins: { marginType: 'none' } }, (success) =>
         resolve(success),
       );
     });

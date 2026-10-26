@@ -1,24 +1,5 @@
 import { cn } from '../../lib/cn';
-import { fieldLabel, formatFieldValue } from './labels';
-
-type Flat = Record<string, unknown>;
-
-function flatten(value: unknown, prefix = '', out: Flat = {}): Flat {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const [k, v] of Object.entries(value)) flatten(v, prefix ? `${prefix}.${k}` : k, out);
-  } else if (prefix) {
-    out[prefix] = value;
-  }
-  return out;
-}
-
-const show = (key: string, v: unknown): string => {
-  if (v === undefined) return '—';
-  if (v === null || v === '') return '(empty)';
-  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
-  if (Array.isArray(v)) return v.length ? v.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ') : '(none)';
-  return formatFieldValue(key, v) ?? String(v);
-};
+import { fieldLabel, flattenValues as flatten, showValue as show } from '@shared/auditFormat';
 
 /** Field-by-field before/after table. Unchanged fields are listed after the changes and dimmed. */
 export function ChangeDiff({ before, after }: { before: unknown; after: unknown }) {

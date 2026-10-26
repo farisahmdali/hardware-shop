@@ -3,7 +3,7 @@ import { Search } from 'lucide-react';
 import type { ProductListRow } from '@shared/contracts';
 import { formatMoney } from '@shared/money';
 import { formatQty, parseQty } from '@shared/qty';
-import { useCommandQuery } from '../../lib/api';
+import { call, useCommandQuery } from '../../lib/api';
 import { useDebounced } from '../../lib/useDebounced';
 import { Input } from '../../components/ui/form';
 import { cn } from '../../lib/cn';
@@ -14,16 +14,23 @@ export interface ProductSearchHandle {
 
 /**
  * Search box for the counter. Type part of a name or code; arrows move, Enter adds.
- * "3*hammer" or "2.5x pipe" adds that quantity.
+ * "3*hammer" or "2.5x pipe" adds that quantity. In purchase mode it shows the last cost
+ * instead of the selling price, and stock levels are only information.
  */
-export const ProductSearch = forwardRef<ProductSearchHandle, { onAdd(p: ProductListRow, qty: number): void }>(function ProductSearch(
-  { onAdd },
+export const ProductSearch = forwardRef<
+  ProductSearchHandle,
+  { onAdd(p: ProductListRow, qty: number): void; mode?: 'sale' | 'purchase'; /** Off where the search is not the screen's main task. */ autoFocus?: boolean }
+>(function ProductSearch(
+  { onAdd, mode = 'sale', autoFocus = true },
   ref,
 ) {
   const [text, setText] = useState('');
   const [active, setActive] = useState(0);
   const [open, setOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  // The list closes a moment after the box loses focus (so a click on a result still lands);
+  // coming back before then must cancel that, or the list closes under the user.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useImperativeHandle(ref, () => ({ focus: () => input.current?.focus() }));
 
   const m = /^\s*(\d+(?:\.\d{1,3})?)\s*[*xX]\s*(.+)$/.exec(text);
@@ -38,27 +45,33 @@ export const ProductSearch = forwardRef<ProductSearchHandle, { onAdd(p: ProductL
   const rows = debounced ? (results.data?.rows ?? []) : [];
   // Results on screen may still belong to the previous search while the new one loads.
   const current = term !== '' && debounced === term && !results.isPlaceholderData && !results.isFetching;
-  const [pendingEnter, setPendingEnter] = useState(false);
   useEffect(() => setActive(0), [debounced]);
 
-  const add = (p: ProductListRow) => {
-    const qty = qtyText ? parseQty(qtyText, p.allowDecimal) : 1000;
+  const add = (p: ProductListRow, quantity = qtyText, clearBox = true) => {
+    const qty = quantity ? parseQty(quantity, p.allowDecimal) : 1000;
     if (qty === null || qty <= 0) return;
     onAdd(p, qty);
+    if (!clearBox) return;
     setText('');
     setOpen(false);
-    setPendingEnter(false);
     input.current?.focus();
   };
 
-  // Enter pressed before the results arrived: add the top match once they do.
-  useEffect(() => {
-    if (pendingEnter && current) {
-      setPendingEnter(false);
-      if (rows[0]) add(rows[0]);
+  // Enter pressed while the list still shows an earlier search: look up exactly what was typed and
+  // add its top match, so a fast typist can go on to the next item without losing this one or
+  // having half-typed text added.
+  const addTopMatch = async (typed: string, searchTerm: string, quantity: string | undefined) => {
+    setText('');
+    setOpen(false);
+    try {
+      const top = (await call('products.list', { search: searchTerm, active: 'ACTIVE', pageSize: 10 })).rows[0];
+      // The box may already hold the next item being typed: leave it alone.
+      if (top) add(top, quantity, false);
+      else setText((now) => now || typed); // nothing matches: show what was typed, with no results
+    } catch {
+      setText((now) => now || typed);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingEnter, current, rows]);
+  };
 
   return (
     <div className="relative">
@@ -69,16 +82,21 @@ export const ProductSearch = forwardRef<ProductSearchHandle, { onAdd(p: ProductL
         role="combobox"
         aria-expanded={open && rows.length > 0}
         aria-controls="product-results"
-        placeholder="Search product name or code…   (F3)   tip: 3*hammer adds 3"
+        placeholder={mode === 'sale' ? 'Search product name or code…   (F3)   tip: 3*hammer adds 3' : 'Search product to add…   tip: 10*cement adds 10'}
         value={text}
-        autoFocus
+        autoFocus={autoFocus}
         className="h-12 pl-11 text-[15px]"
         onChange={(e) => {
           setText(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onFocus={() => {
+          if (closeTimer.current) clearTimeout(closeTimer.current);
+          setOpen(true);
+        }}
+        onBlur={() => {
+          closeTimer.current = setTimeout(() => setOpen(false), 150);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -89,7 +107,7 @@ export const ProductSearch = forwardRef<ProductSearchHandle, { onAdd(p: ProductL
           } else if (e.key === 'Enter') {
             e.preventDefault();
             if (current && rows[active]) add(rows[active]!);
-            else if (term) setPendingEnter(true);
+            else if (term) void addTopMatch(text, term, qtyText);
           } else if (e.key === 'Escape') {
             setText('');
           }
@@ -118,9 +136,13 @@ export const ProductSearch = forwardRef<ProductSearchHandle, { onAdd(p: ProductL
                   {p.brandName && <span className="ml-2 text-[12px] text-ink-3">{p.brandName}</span>}
                 </span>
                 <span className="shrink-0 text-right">
-                  <span className="tabular block font-semibold text-ink">{formatMoney(p.sellingPrice)}</span>
-                  <span className={cn('tabular text-[12px]', p.qty <= 0 ? 'text-danger' : 'text-ink-3')}>
-                    {p.qty <= 0 ? 'Out of stock' : `${formatQty(p.qty)} ${p.unitCode} in stock`}
+                  {mode === 'sale' ? (
+                    <span className="tabular block font-semibold text-ink">{formatMoney(p.sellingPrice)}</span>
+                  ) : (
+                    <span className="tabular block text-ink-2">{p.purchasePrice !== null ? `Last cost ${formatMoney(p.purchasePrice)}` : ''}</span>
+                  )}
+                  <span className={cn('tabular text-[12px]', p.qty <= 0 && mode === 'sale' ? 'text-danger' : 'text-ink-3')}>
+                    {p.qty <= 0 ? (mode === 'sale' ? 'Out of stock' : 'None in stock') : `${formatQty(p.qty)} ${p.unitCode} in stock`}
                   </span>
                 </span>
               </button>

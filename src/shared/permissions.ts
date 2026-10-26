@@ -17,6 +17,7 @@ export const PERMISSIONS = {
   'suppliers.manage': { group: 'Suppliers & purchases', label: 'Add and edit suppliers' },
   'purchases.manage': { group: 'Suppliers & purchases', label: 'Record purchases and supplier returns' },
   'suppliers.pay': { group: 'Suppliers & purchases', label: 'Record supplier payments' },
+  'suppliers.adjustBalance': { group: 'Suppliers & purchases', label: 'Adjust supplier balances and opening balances' },
   'expenses.manage': { group: 'Expenses & cash', label: 'Record and edit expenses' },
   'cash.reconcile': { group: 'Expenses & cash', label: 'Cash entries and daily cash reconciliation' },
   'reports.view': { group: 'Reports', label: 'View sales, stock and rental reports' },

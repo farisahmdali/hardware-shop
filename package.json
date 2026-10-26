@@ -1,7 +1,7 @@
 {
   "name": "hardware-shop",
   "productName": "Hardware Shop Manager",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Offline sales, inventory, rental and accounts management for a hardware shop",
   "private": true,
   "main": "out/main/index.js",
@@ -16,8 +16,11 @@
     "test": "node scripts/run-vitest.mjs run",
     "test:watch": "node scripts/run-vitest.mjs",
     "test:e2e": "npm run build && playwright test",
-    "dist": "npm run build && electron-builder --win nsis",
-    "dist:mac": "npm run build && electron-builder --mac dmg --publish never"
+    "perf": "node scripts/run-vitest.mjs run --config vitest.perf.config.ts",
+    "test:install": "npm run build && node scripts/build-test-installers.mjs && playwright test -c playwright.install.config.ts",
+    "dist": "npm run build && electron-builder --win nsis && node scripts/check-package.mjs release/win-unpacked",
+    "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "icon": "electron scripts/make-icon.mjs"
   },
   "build": {
     "appId": "com.hardwareshop.manager",
@@ -27,10 +30,16 @@
     },
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/better-sqlite3/{deps,src,build}/**/*"
+    ],
+    "electronLanguages": [
+      "en-US",
+      "en-GB"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,

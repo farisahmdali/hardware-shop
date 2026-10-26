@@ -79,7 +79,6 @@ export function createDispatcher(deps: DispatcherDeps) {
       if (handler.access !== 'public') {
         if (!session) throw new AppError(ErrorCodes.UNAUTHENTICATED, 'Please sign in again.');
         if (handler.access !== 'authenticated' && !session.permissions.includes(handler.access)) {
-          recordDenied(deps.env, actor, name, handler.access);
           throw new AppError(ErrorCodes.PERMISSION_DENIED, 'You do not have permission to do this.', {
             permission: handler.access,
           });
@@ -96,7 +95,20 @@ export function createDispatcher(deps: DispatcherDeps) {
       });
       return { ok: true, data: data ?? null };
     } catch (e) {
-      if (e instanceof AppError) return { ok: false, error: e.toPayload() };
+      if (e instanceof AppError) {
+        // Every refused attempt is recorded, whether refused here or by a check inside the command
+        // (a discount above the role's limit, a report the role may not see, ...).
+        if (e.code === ErrorCodes.PERMISSION_DENIED) {
+          try {
+            const actor = actorFromSession(deps.getSession(senderId));
+            const permission = (e.details as { permission?: string } | undefined)?.permission ?? e.message;
+            recordDenied(deps.env, actor, String(command), permission);
+          } catch (logError) {
+            deps.env.logger.error('Could not record a refused action', logError);
+          }
+        }
+        return { ok: false, error: e.toPayload() };
+      }
       if (e instanceof ZodError) {
         return {
           ok: false,

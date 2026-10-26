@@ -170,7 +170,7 @@ export function BillingPage() {
       });
       setDone({ ...r, change: Math.max(0, change) });
       await qc.invalidateQueries({
-        predicate: (q) => ['products.', 'stock.', 'invoices.', 'customers.', 'receivables.', 'payments.', 'audit.', 'sales.'].some((p) => String(q.queryKey[0]).startsWith(p)),
+        predicate: (q) => ['products.', 'stock.', 'invoices.', 'customers.', 'receivables.', 'payments.', 'audit.', 'sales.', 'dashboard.', 'reports.'].some((p) => String(q.queryKey[0]).startsWith(p)),
       });
     } catch (e) {
       setError(errorMessage(e));
@@ -489,11 +489,14 @@ export function BillingPage() {
             </Card>
           )}
 
-          {error && <ErrorBanner title="Not saved" message={error} />}
-          {problems.length > 0 && state.lines.length > 0 && <p className="text-[13px] text-ink-3">{problems[0]}</p>}
-          <Button size="lg" className="h-14 text-[17px]" busy={busy} disabled={problems.length > 0 || !customer} onClick={finalize}>
-            Save bill {state.lines.length > 0 && `· ${formatMoney(bill.grandTotal)}`} (F9)
-          </Button>
+          {/* Stays in view at the bottom of small screens while the bill panel scrolls. */}
+          <div className="sticky bottom-0 z-10 -mx-2 flex flex-col gap-2 bg-bg px-2 pt-2 pb-3">
+            {error && <ErrorBanner title="Not saved" message={error} />}
+            {problems.length > 0 && state.lines.length > 0 && <p className="text-[13px] text-ink-3">{problems[0]}</p>}
+            <Button size="lg" className="h-14 text-[17px]" busy={busy} disabled={problems.length > 0 || !customer} onClick={finalize}>
+              Save bill {state.lines.length > 0 && `· ${formatMoney(bill.grandTotal)}`} (F9)
+            </Button>
+          </div>
         </div>
       </div>
 

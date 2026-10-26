@@ -49,3 +49,31 @@ export function createMainWindow(isDev: boolean): BrowserWindow {
   }
   return win;
 }
+
+/**
+ * A small notice shown while a large shop's data is backed up and upgraded after installing a
+ * new version (it can take a minute), so the application is not mistaken for not starting.
+ * Static text only: no preload, no scripts.
+ */
+export function createUpgradeNotice(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 440,
+    height: 150,
+    frame: false,
+    resizable: false,
+    movable: true,
+    center: true,
+    show: false,
+    backgroundColor: '#ffffff',
+    title: 'Hardware Shop Manager',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, javascript: false, devTools: false },
+  });
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"></head>
+<body style="margin:0;font:15px 'Segoe UI',sans-serif;color:#1f2a28;border:1px solid #d9d5cc;height:148px;box-sizing:border-box;padding:26px 28px">
+<div style="font-weight:600;font-size:17px;margin-bottom:8px">Updating the shop data…</div>
+<div style="color:#5c6461">A copy of the data is saved first, then it is upgraded for the new version. This can take a minute for a large shop. Please do not switch off the computer.</div>
+</body></html>`;
+  void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  win.once('ready-to-show', () => win.show());
+  return win;
+}

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { Activity, CreditCard, Wrench, DatabaseBackup, KeyRound, ReceiptText, Store, UserCog, Users } from 'lucide-react';
+import { Activity, CreditCard, Wrench, DatabaseBackup, KeyRound, ReceiptText, Store, Truck, UserCog, Users } from 'lucide-react';
 import type { Permission } from '@shared/permissions';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/cn';
@@ -14,6 +14,7 @@ import { RolesSettings } from './RolesSettings';
 import { AccountSettings } from './AccountSettings';
 import { PaymentsPrintingSettings } from './PaymentsPrintingSettings';
 import { RentalSettings } from './RentalSettings';
+import { PurchaseSettings } from './PurchaseSettings';
 
 const SECTIONS: { path: string; label: string; icon: typeof Store; permission?: Permission; element: ReactElement }[] = [
   { path: 'backup', label: 'Backup', icon: DatabaseBackup, permission: 'backup.create', element: <BackupSettings /> },
@@ -21,6 +22,7 @@ const SECTIONS: { path: string; label: string; icon: typeof Store; permission?: 
   { path: 'billing', label: 'Billing, tax & stock', icon: ReceiptText, permission: 'settings.manage', element: <BillingSettings /> },
   { path: 'payments', label: 'Payments & printing', icon: CreditCard, permission: 'settings.manage', element: <PaymentsPrintingSettings /> },
   { path: 'rentals', label: 'Rental rules', icon: Wrench, permission: 'settings.manage', element: <RentalSettings /> },
+  { path: 'purchases', label: 'Purchases', icon: Truck, permission: 'settings.manage', element: <PurchaseSettings /> },
   { path: 'users', label: 'Users', icon: Users, permission: 'users.manage', element: <UsersSettings /> },
   { path: 'roles', label: 'Roles & permissions', icon: UserCog, permission: 'users.manage', element: <RolesSettings /> },
   { path: 'health', label: 'Data health', icon: Activity, permission: 'settings.manage', element: <DataHealth /> },
