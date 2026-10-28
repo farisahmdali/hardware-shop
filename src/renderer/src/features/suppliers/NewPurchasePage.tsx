@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Trash2, Truck } from 'lucide-react';
-import type { ProductListRow, SupplierDetail, SupplierRow } from '@shared/contracts';
-import { formatMoney, roundToRupee } from '@shared/money';
+import type { ProductListRow, PurchaseDetail, SupplierDetail, SupplierRow } from '@shared/contracts';
+import type { Discount } from '@shared/billing';
+import { formatMoney, mulDivRound, roundToRupee } from '@shared/money';
 import { formatQty } from '@shared/qty';
 import { claimsInputGst, computePurchase } from '@shared/purchasing';
 import { GST_RATES_BP, formatRate } from '@shared/stock';
@@ -33,8 +34,47 @@ interface Line {
 
 type SupplierInfo = Pick<SupplierRow, 'id' | 'name' | 'gstin' | 'stateCode'>;
 
+/** A bill being edited: its current version, and its supplier and products as they are now. */
+export interface ExistingBill {
+  purchase: PurchaseDetail;
+  supplier: SupplierInfo;
+  products: Map<number, ProductListRow>;
+}
+
+/**
+ * The percentage that gives a line's recorded discount. Discounts are entered as percentages and
+ * stored as amounts; the roundest percentage that reproduces the amount exactly is chosen.
+ */
+function discountBpFor(gross: number, amount: number): number {
+  if (!amount || !gross) return 0;
+  for (const step of [100, 50, 25, 1]) {
+    const bp = Math.round((amount * 10_000) / gross / step) * step;
+    if (mulDivRound(gross, bp, 10_000) === amount) return bp;
+  }
+  return Math.round((amount * 10_000) / gross);
+}
+
+function linesFrom(existing: ExistingBill): Line[] {
+  return existing.purchase.lines.map((l) => ({
+    key: crypto.randomUUID(),
+    product: existing.products.get(l.productId)!,
+    qty: l.qty,
+    unitCost: l.unitCost,
+    gstRateBp: l.gstRateBp,
+    discountBp: discountBpFor(l.gross, l.lineDiscount),
+  }));
+}
+
 /** Enter a supplier's bill: stock comes in at landed cost and the amount is owed to the supplier. */
 export function NewPurchasePage() {
+  return <PurchaseForm />;
+}
+
+/**
+ * The supplier's bill form, for a new purchase or, with `existing`, for editing one. An edit is
+ * saved as a new version of the bill; the version edited is kept in the history.
+ */
+export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
   const navigate = useNavigate();
   const toast = useToast();
   const can = useCan();
@@ -44,21 +84,29 @@ export function NewPurchasePage() {
   const presetSupplier = useCommandQuery('suppliers.get', { id: preset ?? 0 }, { enabled: preset !== null });
   const search = useRef<ProductSearchHandle>(null);
 
-  const [supplier, setSupplier] = useState<SupplierInfo | null>(null);
+  const bill0 = existing?.purchase;
+  const [supplier, setSupplier] = useState<SupplierInfo | null>(existing?.supplier ?? null);
   const [picking, setPicking] = useState(false);
-  const [billNo, setBillNo] = useState('');
-  const [billDate, setBillDate] = useState(() => businessDateOf(new Date()));
-  const [includesTax, setIncludesTax] = useState(false);
-  const [lines, setLines] = useState<Line[]>([]);
-  const [additional, setAdditional] = useState<number | null>(null);
-  const [additionalNote, setAdditionalNote] = useState('');
-  const [roundOff, setRoundOff] = useState(0);
-  const [notes, setNotes] = useState('');
+  const [billNo, setBillNo] = useState(bill0?.supplierInvoiceNo ?? '');
+  const [billDate, setBillDate] = useState(() => bill0?.supplierInvoiceDate ?? businessDateOf(new Date()));
+  const [includesTax, setIncludesTax] = useState(bill0?.pricesIncludeTax ?? false);
+  const [lines, setLines] = useState<Line[]>(() => (existing ? linesFrom(existing) : []));
+  const [additional, setAdditional] = useState<number | null>(bill0?.additionalCosts || null);
+  const [additionalNote, setAdditionalNote] = useState(bill0?.additionalCostsNote ?? '');
+  const [roundOff, setRoundOff] = useState(bill0?.roundOff ?? 0);
+  const [notes, setNotes] = useState(bill0?.notes ?? '');
   const [payments, setPayments] = useState<PaymentEntry[]>([]);
   const [updatePrices, setUpdatePrices] = useState(true);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(newRequestId);
+  // A discount on the whole bill cannot be entered here, but a bill recorded with one keeps it.
+  const [billDiscount] = useState<Discount | null>(() => {
+    const amount = bill0 ? bill0.lines.reduce((a, l) => a + l.billDiscount, 0) : 0;
+    return amount > 0 ? { type: 'AMOUNT', value: amount } : null;
+  });
   const create = useCommandMutation('purchases.create', { invalidate: SUPPLIER_INVALIDATE });
+  const edit = useCommandMutation('purchases.edit', { invalidate: SUPPLIER_INVALIDATE });
 
   useEffect(() => {
     if (presetSupplier.data && !supplier) setSupplier(presetSupplier.data);
@@ -78,14 +126,14 @@ export function NewPurchasePage() {
           gstRateBp: registered ? l.gstRateBp : 0,
           discount: l.discountBp ? { type: 'PERCENT' as const, valueBp: l.discountBp } : null,
         })),
-        { pricesIncludeTax: includesTax, interstate, billDiscount: null, additionalCosts: additional ?? 0, roundOff, itcClaimed: itc },
+        { pricesIncludeTax: includesTax, interstate, billDiscount, additionalCosts: additional ?? 0, roundOff, itcClaimed: itc },
       ),
-    [ready, registered, includesTax, interstate, additional, roundOff, itc],
+    [ready, registered, includesTax, interstate, billDiscount, additional, roundOff, itc],
   );
   const { bill } = calc;
   const tax = bill.cgstTotal + bill.sgstTotal + bill.igstTotal;
   const maxRoundOff = s?.purchases.maxRoundOff ?? 1000;
-  const paid = payments.reduce((a, p) => a + (p.amount ?? 0), 0);
+  const paid = existing ? 0 : payments.reduce((a, p) => a + (p.amount ?? 0), 0);
   const landedOf = (l: Line) => {
     const i = ready.indexOf(l);
     return i === -1 ? null : calc.landed[i]!;
@@ -113,33 +161,39 @@ export function NewPurchasePage() {
   if (lines.length !== ready.length) problems.push('Every item needs a quantity and a rate');
   if (Math.abs(roundOff) > maxRoundOff) problems.push(`Round-off can be at most ${formatMoney(maxRoundOff)}`);
   if (paid > calc.grandTotal) problems.push('Payments are more than the bill total');
+  if (existing && reason.trim().length < 3) problems.push('Say why the bill is being changed');
 
   const save = async () => {
     if (!supplier || problems.length) return;
     setError(null);
+    const fields = {
+      supplierId: supplier.id,
+      supplierInvoiceNo: billNo,
+      supplierInvoiceDate: billDate,
+      pricesIncludeTax: includesTax,
+      lines: ready.map((l) => ({
+        productId: l.product.id,
+        qty: l.qty!,
+        unitCost: l.unitCost!,
+        gstRateBp: registered ? l.gstRateBp : 0,
+        discount: l.discountBp ? ({ type: 'PERCENT', valueBp: l.discountBp } as const) : null,
+      })),
+      billDiscount,
+      additionalCosts: additional ?? 0,
+      additionalCostsNote: additionalNote,
+      roundOff,
+      notes,
+      updatePurchasePrices: updatePrices,
+      expectedGrandTotal: calc.grandTotal,
+    };
     try {
-      const r = await create.mutateAsync({
-        requestId,
-        supplierId: supplier.id,
-        supplierInvoiceNo: billNo,
-        supplierInvoiceDate: billDate,
-        pricesIncludeTax: includesTax,
-        lines: ready.map((l) => ({
-          productId: l.product.id,
-          qty: l.qty!,
-          unitCost: l.unitCost!,
-          gstRateBp: registered ? l.gstRateBp : 0,
-          discount: l.discountBp ? { type: 'PERCENT', valueBp: l.discountBp } : null,
-        })),
-        billDiscount: null,
-        additionalCosts: additional ?? 0,
-        additionalCostsNote: additionalNote,
-        roundOff,
-        notes,
-        payments: toPayments(payments),
-        updatePurchasePrices: updatePrices,
-        expectedGrandTotal: calc.grandTotal,
-      });
+      if (existing) {
+        const r = await edit.mutateAsync({ ...fields, requestId, id: existing.purchase.id, reason: reason.trim() });
+        toast.success(`Saved as ${r.purchaseNo}`, `${existing.purchase.purchaseNo} is kept in the history.`);
+        navigate(`/suppliers/purchases/${r.purchaseId}`, { replace: true });
+        return;
+      }
+      const r = await create.mutateAsync({ ...fields, requestId, payments: toPayments(payments) });
       toast.success(`Purchase ${r.purchaseNo} saved`, r.outstanding > 0 ? `${formatMoney(r.outstanding)} to pay ${supplier.name}` : 'Fully paid');
       navigate(`/suppliers/purchases/${r.purchaseId}`, { replace: true });
     } catch (e) {
@@ -151,10 +205,23 @@ export function NewPurchasePage() {
 
   return (
     <>
-      <Link to="/suppliers" className="mb-3 inline-flex items-center gap-1 text-ink-2 hover:text-ink">
-        <ArrowLeft className="size-4" /> Suppliers & Purchases
-      </Link>
-      <PageHeader title="New purchase" description="Copy the supplier's bill. Stock is added at the bill's cost when you save." />
+      {existing ? (
+        <Link to={`/suppliers/purchases/${existing.purchase.id}`} className="mb-3 inline-flex items-center gap-1 text-ink-2 hover:text-ink">
+          <ArrowLeft className="size-4" /> {existing.purchase.purchaseNo}
+        </Link>
+      ) : (
+        <Link to="/suppliers" className="mb-3 inline-flex items-center gap-1 text-ink-2 hover:text-ink">
+          <ArrowLeft className="size-4" /> Suppliers & Purchases
+        </Link>
+      )}
+      {existing ? (
+        <PageHeader
+          title={`Edit ${existing.purchase.purchaseNo}`}
+          description="Correct anything on the bill. Saving records the corrected bill as a new version and keeps this one, unchanged, in the history."
+        />
+      ) : (
+        <PageHeader title="New purchase" description="Copy the supplier's bill. Stock is added at the bill's cost when you save." />
+      )}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_400px]">
         <div className="flex min-w-0 flex-col gap-5">
           <Card>
@@ -198,8 +265,8 @@ export function NewPurchasePage() {
                     <tr>
                       <th className="min-w-56 px-4 py-2">Item</th>
                       <th className="w-32 px-2 py-2 text-right">Qty</th>
-                      <th className="w-32 px-2 py-2 text-right">Rate</th>
-                      <th className="w-24 px-2 py-2">GST</th>
+                      <th className="w-36 px-2 py-2 text-right">Rate</th>
+                      <th className="w-28 px-2 py-2">GST</th>
                       <th className="w-20 px-2 py-2 text-right">Disc %</th>
                       <th className="px-2 py-2 text-right">Amount</th>
                       <th className="w-10" />
@@ -341,7 +408,7 @@ export function NewPurchasePage() {
               </p>
             </div>
           </Card>
-          {can('suppliers.pay') && (
+          {!existing && can('suppliers.pay') && (
             <Card>
               <div className="p-5">
                 <PaymentLines label="Paid now (optional)" due={calc.grandTotal} value={payments} onChange={setPayments} remainder="is owed to the supplier" />
@@ -351,10 +418,17 @@ export function NewPurchasePage() {
           <Card>
             <div className="flex flex-col gap-3 p-5">
               <Checkbox checked={updatePrices} onChange={setUpdatePrices} label="Set each product's purchase price to its new cost" />
+              {existing && (
+                <Field label="Why is the bill being changed?" required hint="Saved in the history with your name.">
+                  {(p) => (
+                    <Textarea {...p} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="e.g. Wrong rate entered for the drill bits" />
+                  )}
+                </Field>
+              )}
               {error && <ErrorBanner title="Not saved" message={error} />}
               {problems.length > 0 && lines.length > 0 && <p className="text-[13px] text-ink-3">{problems[0]}.</p>}
-              <Button size="lg" busy={create.isPending} disabled={problems.length > 0} onClick={save}>
-                Save purchase · {formatMoney(calc.grandTotal)}
+              <Button size="lg" busy={create.isPending || edit.isPending} disabled={problems.length > 0} onClick={save}>
+                {existing ? 'Save changes' : 'Save purchase'} · {formatMoney(calc.grandTotal)}
               </Button>
             </div>
           </Card>

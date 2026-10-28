@@ -12,4 +12,6 @@ playwright-report/
 *.db-shm
 release-1.0.0
 release-test
+installer-test-*
 installer-test
+release-*

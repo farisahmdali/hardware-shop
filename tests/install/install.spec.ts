@@ -15,7 +15,7 @@ import { completeSetup } from '../e2e/app';
 const root = join(__dirname, '../..');
 const NAME = 'HSM Install Test';
 const installer = (label: 'a' | 'b') => {
-  const dir = join(root, 'installer-test', label);
+  const dir = join(root, process.env.HWS_INSTALLER_DIR || 'installer-test', label);
   const exe = readdirSync(dir).find((f) => f.endsWith('.exe') && f.includes('Setup'));
   if (!exe) throw new Error(`No installer in ${dir}; run npm run test:install`);
   return { path: join(dir, exe), version: /Setup (.+)\.exe$/.exec(exe)![1]! };

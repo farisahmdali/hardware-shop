@@ -8,7 +8,7 @@ export interface AuditFilter {
   entityType?: string;
   entityId?: string;
   /** Entries about a record or linked to it (e.g. a customer's payments, a product's cost changes). */
-  record?: { type: string; id: string };
+  record?: { type: string; id: string; alsoIds?: string[] };
   action?: string;
   userId?: number;
   /** Everything written in one transaction. */
@@ -60,13 +60,18 @@ const toRow = (r: AuditRecord): AuditRow => ({
  * stored values happen to contain the words. Arguments: x = exact value, l = LIKE pattern,
  * in the order of the query's placeholders.
  */
-const NAMED: { type: string; sql: string; args: ('x' | 'l')[]; asRelated?: boolean }[] = [
+const NAMED: { type: string; sql: string; args: ('x' | 'l' | 'v')[]; asRelated?: boolean }[] = [
   { type: 'product', sql: "SELECT id FROM products WHERE sku = ? COLLATE NOCASE OR name LIKE ? ESCAPE '!'", args: ['x', 'l'] },
   { type: 'customer', sql: "SELECT id FROM customers WHERE code = ? COLLATE NOCASE OR name LIKE ? ESCAPE '!' OR phone LIKE ? ESCAPE '!'", args: ['x', 'l', 'l'] },
   { type: 'supplier', sql: "SELECT id FROM suppliers WHERE code = ? COLLATE NOCASE OR name LIKE ? ESCAPE '!' OR phone LIKE ? ESCAPE '!'", args: ['x', 'l', 'l'] },
   { type: 'invoice', sql: 'SELECT id FROM invoices WHERE invoice_no = ? COLLATE NOCASE', args: ['x'] },
   { type: 'credit_note', sql: 'SELECT id FROM credit_notes WHERE credit_note_no = ? COLLATE NOCASE', args: ['x'], asRelated: true },
-  { type: 'purchase', sql: 'SELECT id FROM purchases WHERE purchase_no = ? COLLATE NOCASE OR supplier_invoice_no = ? COLLATE NOCASE', args: ['x', 'x'] },
+  // A purchase number also finds the bill's edited versions (PUR/2026-27/00012-R2, ...).
+  {
+    type: 'purchase',
+    sql: "SELECT id FROM purchases WHERE purchase_no = ? COLLATE NOCASE OR purchase_no LIKE ? ESCAPE '!' OR supplier_invoice_no = ? COLLATE NOCASE",
+    args: ['x', 'v', 'x'],
+  },
   { type: 'debit_note', sql: 'SELECT id FROM debit_notes WHERE debit_note_no = ? COLLATE NOCASE', args: ['x'], asRelated: true },
   { type: 'payment', sql: "SELECT id FROM payments WHERE party_type = 'CUSTOMER' AND payment_no = ? COLLATE NOCASE", args: ['x'] },
   { type: 'supplier_payment', sql: "SELECT id FROM payments WHERE party_type = 'SUPPLIER' AND payment_no = ? COLLATE NOCASE", args: ['x'] },
@@ -82,7 +87,10 @@ function namedMatches(db: Db, text: string): { type: string; ids: string[]; asRe
   const like = `%${text.replace(/[%_!]/g, (c) => `!${c}`)}%`;
   const out: { type: string; ids: string[]; asRelated: boolean }[] = [];
   for (const n of NAMED) {
-    const ids = (db.prepare(`${n.sql} LIMIT 50`).all(...n.args.map((a) => (a === 'x' ? text : like))) as { id: number }[]).map((r) => String(r.id));
+    const version = `${text.replace(/[%_!]/g, (c) => `!${c}`)}-R%`;
+    const ids = (db.prepare(`${n.sql} LIMIT 50`).all(...n.args.map((a) => (a === 'x' ? text : a === 'v' ? version : like))) as { id: number }[]).map((r) =>
+      String(r.id),
+    );
     if (ids.length) out.push({ type: n.type, ids, asRelated: !!n.asRelated });
   }
   return out;
@@ -103,8 +111,11 @@ function whereClause(db: Db, f: Omit<AuditFilter, 'page' | 'pageSize'>): { claus
   eq('user_id', f.userId);
   eq('txn_ref', f.txnRef);
   if (f.record) {
-    where.push('((entity_type = ? AND entity_id = ?) OR (related_type = ? AND related_id = ?))');
-    params.push(f.record.type, f.record.id, f.record.type, f.record.id);
+    // The record, and any other records it stands for (e.g. the earlier versions of an edited bill).
+    const ids = [f.record.id, ...(f.record.alsoIds ?? [])];
+    const marks = ids.map(() => '?').join(', ');
+    where.push(`((entity_type = ? AND entity_id IN (${marks})) OR (related_type = ? AND related_id IN (${marks})))`);
+    params.push(f.record.type, ...ids, f.record.type, ...ids);
   }
   if (f.from) {
     where.push('occurred_at >= ?');

@@ -68,6 +68,7 @@ The scenarios listed in section 22 of the specification, with the tests that cov
 | Record supplier payments | I `purchases`: pays at entry, settles the oldest bills first, uses an advance |
 | Process supplier returns | I `purchases`: credits the supplier, reverses input GST, removes stock at average cost |
 | Verify supplier outstanding balances | I `purchases`, I `reports`: supplier balances match payables |
+| Edit a purchase, keeping its history | I `purchaseEdit`: a corrected version is saved and the earlier one kept; stock, input GST, accounts and what is owed follow the correction, dated on the bill's day; payments carry over; only changed products move stock; after sales, stock is corrected at average cost and an edit bringing in less than was sold is refused; repeated edits number -R2, -R3 and only the newest can be changed; refusals for returned, cancelled or unchanged bills and duplicate bill numbers; each edit recorded with every change, the user and the reason · I `randomized`: edits mixed into the random sequences · E `purchaseEdit` |
 
 ### History
 
@@ -193,3 +194,18 @@ The history text search reads every history entry, so its limit is 1.5 s rather 
 ### The release installer
 
 `Hardware Shop Manager Setup 1.0.0.exe`, 123,851,319 bytes, SHA-256 `0EE6E7A131BD86CD4A1D217EC60558576FEBE836FFB0E4C205469733905D6130`. Package check passed; the built application starts on a new data folder and reports version 1.0.0.
+
+## Version 1.1.0: editing purchases (28 October 2026)
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | No errors |
+| `npm test` | 245 passed (1 skipped, as above), including 8 new tests for editing purchases and purchase edits in the randomized sequences |
+| `npm run test:e2e` | 11 of 11 passed, including the new purchase edit test |
+| `npm run test:install` | Passed (installers 1.1.0 and 1.1.1, package check passed) |
+| Upgrade of a real shop's data | The development computer's shop data, already at version 8 (upgraded by a run of the application on 28 October, with its own backup first), upgraded on a copy to version 9: every row kept, data check clean |
+| `npm run perf` | Not run again: editing adds no work to the operations measured |
+
+The release installer is `Hardware Shop Manager Setup 1.1.0.exe`, 123,855,379 bytes, SHA-256 `C25777636A343FC834C537D55A0E01F772D3E341BD54FBEE9263564FF1D044F5`. The package check passed. The built application could not be started from the build folder for a last look, because a copy of the application was open on the same computer (only one can run at a time).
+
+`HWS_INSTALLER_DIR=<folder> npm run test:install` builds the test installers into another folder, for when an editor keeps the previous build's files open.

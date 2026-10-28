@@ -33,6 +33,7 @@ import { SuppliersPage } from './features/suppliers/SuppliersPage';
 import { SupplierDetailPage } from './features/suppliers/SupplierDetailPage';
 import { NewPurchasePage } from './features/suppliers/NewPurchasePage';
 import { PurchaseDetailPage } from './features/suppliers/PurchaseDetailPage';
+import { EditPurchasePage } from './features/suppliers/EditPurchasePage';
 import { ExpensesPage } from './features/expenses/ExpensesPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { ReportPage } from './features/reports/ReportPage';
@@ -79,6 +80,7 @@ export function App() {
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/suppliers/purchases/new" element={<NewPurchasePage />} />
           <Route path="/suppliers/purchases/:id" element={<PurchaseDetailPage />} />
+          <Route path="/suppliers/purchases/:id/edit" element={<EditPurchasePage />} />
           <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/reports" element={<ReportsPage />} />

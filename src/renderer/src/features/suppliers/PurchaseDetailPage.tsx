@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, Eye, Undo2, Wallet } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Ban, Eye, History, Pencil, Undo2, Wallet } from 'lucide-react';
 import { formatMoney } from '@shared/money';
 import { formatQty } from '@shared/qty';
 import { formatDate, formatDateTime } from '@shared/time';
@@ -22,6 +22,7 @@ import { PurchaseStatusBadge, SUPPLIER_INVALIDATE } from './shared';
 
 export function PurchaseDetailPage() {
   const id = Number(useParams().id);
+  const navigate = useNavigate();
   const can = useCan();
   const toast = useToast();
   const query = useCommandQuery('purchases.get', { id });
@@ -32,9 +33,11 @@ export function PurchaseDetailPage() {
   if (query.isPending) return <Spinner />;
   if (query.isError) return <ErrorBanner message={query.error.message} />;
   const p = query.data;
-  const cancelled = p.status === 'CANCELLED';
+  // An earlier version of an edited bill is history: nothing more can be done with it.
+  const cancelled = p.status === 'CANCELLED' || p.status === 'REPLACED';
   const canReturn = !cancelled && can('purchases.manage') && p.lines.some((l) => l.qty > l.returnedQty);
   const canCancel = !cancelled && can('purchases.manage') && p.debitNotes.length === 0;
+  const canEdit = canCancel;
   const tax = p.cgstTotal + p.sgstTotal + p.igstTotal;
 
   return (
@@ -47,6 +50,7 @@ export function PurchaseDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="font-mono text-[22px] font-semibold text-ink">{p.purchaseNo}</h1>
             <PurchaseStatusBadge status={p.status} overdue={p.overdue} />
+            {p.versions.length > 1 && <Badge tone="info">Version {p.version} of {p.versions.length}</Badge>}
           </div>
           <p className="text-ink-2">
             <Link to={`/suppliers/${p.supplierId}`} className="text-brand hover:underline">
@@ -62,6 +66,11 @@ export function PurchaseDetailPage() {
               Pay this bill
             </Button>
           )}
+          {canEdit && (
+            <Button variant="outline" icon={<Pencil className="size-4" />} onClick={() => navigate(`/suppliers/purchases/${p.id}/edit`)}>
+              Edit
+            </Button>
+          )}
           {canReturn && (
             <Button variant="outline" icon={<Undo2 className="size-4" />} onClick={() => setDialog('return')}>
               Return goods
@@ -75,6 +84,20 @@ export function PurchaseDetailPage() {
         </div>
       </header>
 
+      {p.replacedBy && (
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-line bg-surface-2 px-4 py-3">
+          <div>
+            <p className="font-semibold text-ink">
+              This is an earlier version. The bill was edited {formatDateTime(p.replacedBy.at)} by {p.replacedBy.username ?? 'system'}.
+            </p>
+            <p className="text-ink-2">Reason: {p.replacedBy.reason}</p>
+          </div>
+          <Link to={`/suppliers/purchases/${p.replacedBy.id}`} className="font-medium text-brand hover:underline">
+            Open the newer version {p.replacedBy.purchaseNo}
+          </Link>
+        </div>
+      )}
+
       {p.cancellation && (
         <div className="mb-5 rounded-lg border border-line bg-surface-2 px-4 py-3">
           <p className="font-semibold text-ink">
@@ -84,7 +107,7 @@ export function PurchaseDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[1fr_340px]">
         <Card>
           <Table>
             <THead>
@@ -135,6 +158,31 @@ export function PurchaseDetailPage() {
         </Card>
 
         <div className="flex flex-col gap-5">
+          {p.versions.length > 1 && (
+            <Card>
+              <CardHeader title="Versions of this bill" description="Every edit is kept. Open a version to see the bill as it was." />
+              <ol className="flex flex-col divide-y divide-line">
+                {[...p.versions].reverse().map((v) => (
+                  <li key={v.id} className={v.id === p.id ? 'bg-brand-soft/40 px-4 py-2.5' : 'px-4 py-2.5'}>
+                    <div className="flex items-center justify-between gap-2">
+                      {v.id === p.id ? (
+                        <span className="font-mono text-[13px] font-semibold text-ink">{v.purchaseNo}</span>
+                      ) : (
+                        <Link to={`/suppliers/purchases/${v.id}`} className="font-mono text-[13px] text-brand hover:underline">
+                          {v.purchaseNo}
+                        </Link>
+                      )}
+                      <span className="text-[12px] text-ink-3">Version {v.version}</span>
+                    </div>
+                    <p className="text-[12px] text-ink-3">
+                      {v.version === 1 ? 'Entered' : 'Edited'} {formatDateTime(v.savedAt)} by {v.username ?? 'system'}
+                    </p>
+                    {v.reason && <p className="text-[13px] text-ink-2">{v.reason}</p>}
+                  </li>
+                ))}
+              </ol>
+            </Card>
+          )}
           <Card className="p-4">
             <dl className="tabular flex flex-col gap-1.5">
               <Line label="Items" value={formatMoney(p.grossTotal)} />
@@ -261,7 +309,12 @@ export function PurchaseDetailPage() {
         {can('audit.view') && (
           <TabsContent value="history">
             <Card>
-              <EntityHistory entityType="purchase" entityId={p.id} />
+              {p.versions.length > 1 && (
+                <p className="flex items-center gap-2 border-b border-line px-4 py-2.5 text-[13px] text-ink-2">
+                  <History className="size-4 text-ink-3" /> Includes every version of this bill. Open an edit to see exactly what changed.
+                </p>
+              )}
+              <EntityHistory entityType="purchase" entityId={p.id} alsoIds={p.versions.map((v) => v.id)} />
             </Card>
           </TabsContent>
         )}

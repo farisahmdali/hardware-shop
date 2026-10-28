@@ -10,7 +10,7 @@ import { EmptyState, Spinner } from '../../components/ui/layout';
 import { Pagination, Table, Td, Th, THead, Tr } from '../../components/ui/table';
 import { PurchaseStatusBadge } from './shared';
 
-type Status = 'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID' | 'OPEN' | 'OVERDUE' | 'CANCELLED';
+type Status = 'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID' | 'OPEN' | 'OVERDUE' | 'CANCELLED' | 'REPLACED';
 
 /** Purchase bills, newest bill date first. */
 export function PurchasesTable({ supplierId, productId }: { supplierId?: number; productId?: number }) {
@@ -49,6 +49,7 @@ export function PurchasesTable({ supplierId, productId }: { supplierId?: number;
           <option value="PARTIAL">Part paid</option>
           <option value="PAID">Paid</option>
           <option value="CANCELLED">Cancelled</option>
+          <option value="REPLACED">Earlier versions of edited bills</option>
         </Select>
         <label className="flex flex-col gap-1 text-[12px] text-ink-3">
           Bill date from
@@ -82,7 +83,7 @@ export function PurchasesTable({ supplierId, productId }: { supplierId?: number;
                 <Tr
                   key={p.id}
                   tabIndex={0}
-                  className={p.status === 'CANCELLED' ? 'cursor-pointer opacity-60' : 'cursor-pointer'}
+                  className={p.status === 'CANCELLED' || p.status === 'REPLACED' ? 'cursor-pointer opacity-60' : 'cursor-pointer'}
                   onClick={() => navigate(`/suppliers/purchases/${p.id}`)}
                   onKeyDown={(e) => e.key === 'Enter' && navigate(`/suppliers/purchases/${p.id}`)}
                 >
@@ -98,7 +99,7 @@ export function PurchasesTable({ supplierId, productId }: { supplierId?: number;
                     <span className="block text-[12px] text-ink-3">{formatDate(p.supplierInvoiceDate)}</span>
                   </Td>
                   {!supplierId && <Td className="font-medium">{p.supplierName}</Td>}
-                  <Td className={p.overdue ? 'whitespace-nowrap text-danger' : 'whitespace-nowrap text-ink-2'}>{p.status === 'CANCELLED' || p.status === 'PAID' ? '—' : formatDate(p.dueDate)}</Td>
+                  <Td className={p.overdue ? 'whitespace-nowrap text-danger' : 'whitespace-nowrap text-ink-2'}>{p.status === 'CANCELLED' || p.status === 'REPLACED' || p.status === 'PAID' ? '—' : formatDate(p.dueDate)}</Td>
                   <Td>
                     <PurchaseStatusBadge status={p.status} overdue={p.overdue} />
                   </Td>

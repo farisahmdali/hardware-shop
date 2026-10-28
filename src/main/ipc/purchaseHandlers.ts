@@ -8,7 +8,7 @@ import {
   supplierLedger,
   updateSupplier,
 } from '../services/suppliers';
-import { cancelPurchase, createPurchase, createSupplierReturn, getPurchase, listPurchases } from '../services/purchases';
+import { cancelPurchase, createPurchase, createSupplierReturn, editPurchase, getPurchase, listPurchases } from '../services/purchases';
 import {
   applySupplierCredit,
   listPayables,
@@ -88,6 +88,7 @@ export function purchaseHandlers(): HandlerMap {
         return getPurchase(ctx.env.db, input.id, asOf(ctx));
       },
     },
+    'purchases.edit': { access: 'purchases.manage', handle: (input, ctx) => editPurchase(ctx.env, ctx.actor, input) },
     'supplierReturns.create': { access: 'purchases.manage', handle: (input, ctx) => createSupplierReturn(ctx.env, ctx.actor, input) },
 
     'supplierPayments.create': { access: 'suppliers.pay', handle: (input, ctx) => paySupplier(ctx.env, ctx.actor, input) },

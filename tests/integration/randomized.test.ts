@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { getCustomer, walkInCustomerId } from '@main/services/customers';
 import { runIntegrityChecks } from '@main/services/integrity';
 import { reversePayment, receivePayment } from '@main/services/payments';
-import { createPurchase, createSupplierReturn, getPurchase } from '@main/services/purchases';
+import { createPurchase, createSupplierReturn, editPurchase, getPurchase } from '@main/services/purchases';
 import { extendRental, getRental } from '@main/services/rentals';
 import { cancelInvoice, createCreditNote, finalizeSale, getInvoice, type FinalizeInput } from '@main/services/sales';
 import { adjustStock } from '@main/services/stock';
@@ -38,10 +38,13 @@ const COUNTED = [
 const counts = () => Object.fromEntries(COUNTED.map((t) => [t, (env.db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n]));
 const sumSeq = () => (env.db.prepare('SELECT COALESCE(SUM(next_value), 0) AS n FROM doc_sequences').get() as { n: number }).n;
 
-/** Every document number of one kind, e.g. INV/2026-27/00001 ... must run 1, 2, 3 ... with no gaps or repeats. */
+/**
+ * Every document number of one kind, e.g. INV/2026-27/00001 ... must run 1, 2, 3 ... with no gaps or
+ * repeats. Edited versions of a bill (…/00012-R2) share the original's number and are left out.
+ */
 function expectGapFree(table: string, column: string) {
   const byPrefix = new Map<string, number[]>();
-  for (const { no } of env.db.prepare(`SELECT ${column} AS no FROM ${table}`).all() as { no: string }[]) {
+  for (const { no } of env.db.prepare(`SELECT ${column} AS no FROM ${table} WHERE ${column} NOT LIKE '%-R%'`).all() as { no: string }[]) {
     const m = /^(.*\/)(\d+)$/.exec(no)!;
     byPrefix.set(m[1]!, [...(byPrefix.get(m[1]!) ?? []), Number(m[2])]);
   }
@@ -116,6 +119,14 @@ function runSequence(seed: number, steps: number) {
     }],
     ['supplier payment', 3, () =>
       paySupplier(env, shop.actor, { requestId: randomUUID(), supplierId: pick(suppliers), amount: rupees(between(100, 2000)), methodId: shop.upi, reference: '', notes: '', allocations: [] })],
+    ['purchase edit', 3, () => {
+      // The newest version of a bill, edited to new quantities and rates of the same products.
+      const id = pick(ids('SELECT p.id FROM purchases p WHERE NOT EXISTS (SELECT 1 FROM purchase_cancellations c WHERE c.purchase_id = p.id)'));
+      const bill = getPurchase(env.db, id, shop.today());
+      const lines = bill.lines.map((l) => ({ productId: l.productId, qty: Math.max(units(1), l.qty + units(between(-3, 3))), cost: rupees(between(10, 500)) }));
+      const { payments: _payments, ...fields } = shop.purchaseInput(bill.supplierId, lines);
+      editPurchase(env, shop.actor, { ...fields, supplierInvoiceNo: bill.supplierInvoiceNo, requestId: randomUUID(), id, reason: 'Corrected from the bill' });
+    }],
     ['supplier return', 2, () => {
       const purchaseId = pick(ids('SELECT id FROM purchases'));
       const line = pick(getPurchase(env.db, purchaseId, shop.today()).lines);
@@ -182,6 +193,6 @@ describe('a long random sequence of shop operations', () => {
     const outcomes = runSequence(seed, 400);
     // The sequence really exercised the shop: every kind of operation went through at least once.
     for (const [name, o] of Object.entries(outcomes)) expect({ name, done: o.done > 0 }).toEqual({ name, done: true });
-    expect(Object.keys(outcomes).length).toBe(13);
+    expect(Object.keys(outcomes).length).toBe(14);
   }, 120_000);
 });

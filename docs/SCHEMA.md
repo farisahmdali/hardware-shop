@@ -141,6 +141,10 @@ Indexes only, no data changes: invoices by kind and date and by rental; invoice 
 
 Index only, no data changes: `idx_ledger_party_account` on ledger entries by party, account and business date. Statements, the customer list and customer balances read one party's receivable or payable entries; without it a large shop scanned every party's entries for the period (found by the performance run).
 
+## Migration 009: purchase revisions
+
+`purchase_revisions` (append-only) links each replaced version of an edited purchase (`purchase_id`) to the version that replaced it (`revised_purchase_id`), with the first version (`original_purchase_id`), the new version's number (`revision`, from 2), the reason, the user and the time. Each version is an ordinary `purchases` row; the replaced one also has a `purchase_cancellations` row from the same edit, so every total, balance and report counts only the newest version. The reversal of a replaced version is posted with ledger `ref_type` `PURCHASE_REVISED`.
+
 ## Later migrations
 
 Each later phase that needs new tables adds its own migration. Existing data is never dropped or rewritten destructively.

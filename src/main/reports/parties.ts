@@ -52,7 +52,7 @@ const supplierStatement: ReportImpl = ({ db, params: p, today }) => {
       col('credit', 'Billed', 'money', true),
       col('balance', 'Balance', 'money'),
     ],
-    rows: ledgerRows(l, (t, id) => (t === 'PURCHASE' || t === 'PURCHASE_CANCEL' ? { to: 'purchase', id: Number(id) } : undefined)),
+    rows: ledgerRows(l, (t, id) => (t === 'PURCHASE' || t === 'PURCHASE_CANCEL' || t === 'PURCHASE_REVISED' ? { to: 'purchase', id: Number(id) } : undefined)),
     noTotals: true,
     summary: [{ label: l.closingBalance >= 0 ? 'The shop owes' : 'Advance with the supplier', value: Math.abs(l.closingBalance), kind: 'money' }],
     notes: [

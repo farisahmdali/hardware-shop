@@ -153,6 +153,7 @@ A product that is no longer sold is made inactive, not deleted, so old bills sti
 - **New purchase:** choose the supplier, enter their bill number and date, then each product with quantity and cost. Freight and other charges are spread over the items into their cost. GST paid to a registered supplier is kept separately as input tax credit (if the shop is GST registered). Saving adds the stock.
 - **Pay supplier** or **Pay this bill:** record what you paid. Payments settle the oldest bills first; extra is kept as an advance.
 - **Return goods** on a purchase: sends items back to the supplier and creates a debit note.
+- **Edit** a purchase to correct anything on it: the supplier, their bill number or date, items, quantities, rates, GST, discounts, freight or notes. Give the reason for the change. The corrected bill is saved as a new version (for example PUR/2026-27/00012-R2); the bill as it was is kept, marked *replaced*, and the page shows every version. **History** shows exactly what changed, who changed it and why. Stock, what you owe the supplier and GST are corrected automatically, and payments already made count towards the corrected bill. A bill cannot be edited once goods have been returned against it, and the corrected bill cannot bring in fewer goods than have already been sold.
 - **Cancel purchase** if a bill was entered by mistake. This is only possible while the goods it brought in are still in stock and none have been returned to the supplier.
 
 ## 10. Expenses and the cash drawer

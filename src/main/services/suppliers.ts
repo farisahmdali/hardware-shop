@@ -289,6 +289,7 @@ const LEDGER_DOCS = `
   CASE l.ref_type
     WHEN 'PURCHASE' THEN (SELECT purchase_no FROM purchases WHERE id = l.ref_id)
     WHEN 'PURCHASE_CANCEL' THEN (SELECT purchase_no FROM purchases WHERE id = l.ref_id)
+    WHEN 'PURCHASE_REVISED' THEN (SELECT purchase_no FROM purchases WHERE id = l.ref_id)
     WHEN 'DEBIT_NOTE' THEN (SELECT debit_note_no FROM debit_notes WHERE id = l.ref_id)
     WHEN 'SUPPLIER_ADJUSTMENT' THEN 'ADJ-' || l.ref_id
     ELSE (SELECT payment_no FROM payments WHERE id = l.ref_id)
@@ -297,6 +298,7 @@ const LEDGER_DOCS = `
 const DESCRIPTIONS: Record<string, string> = {
   PURCHASE: 'Purchase bill',
   PURCHASE_CANCEL: 'Purchase cancelled',
+  PURCHASE_REVISED: 'Purchase edited: earlier version reversed',
   DEBIT_NOTE: 'Goods returned (debit note)',
   SUPPLIER_PAYMENT: 'Payment made',
   SUPPLIER_REFUND: 'Refund received',

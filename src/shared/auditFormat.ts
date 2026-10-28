@@ -8,6 +8,7 @@ import { MOVEMENT_TYPES } from './stock';
 export const pretty = (s: string): string => s.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 
 const ACTION_LABELS: Record<string, string> = {
+  EDIT: 'Edited',
   DENIED: 'Refused: no permission',
   BACKUP_PRUNED: 'Old backups removed',
   BACKUP_RESTORED: 'Data restored from a backup',
@@ -126,6 +127,11 @@ const FIELD_LABELS: Record<string, string> = {
   expectedAmount: 'Expected in drawer',
   countedAmount: 'Counted',
   differenceAmount: 'Difference',
+  supplierInvoiceDate: 'Supplier bill date',
+  ratesIncludeGst: 'Rates include GST',
+  freightAmount: 'Freight / other charges',
+  freightNote: 'What the charges are for',
+  roundOffAmount: 'Round-off',
   fileName: 'File',
   folder: 'Folder',
   sizeBytes: 'Size (bytes)',
@@ -148,10 +154,14 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 export function fieldLabel(key: string): string {
+  // Items of a bill are recorded by product: "items.Claw hammer (P-000001)".
+  if (key.startsWith('items.')) return `Item: ${key.slice(6)}`;
   return FIELD_LABELS[key] ?? key;
 }
 
 const MONEY_KEYS = /(price|cost|value|amount|total|balance|limit)$/i;
+/** Amounts in paise whose names do not end like one. */
+const MONEY_FIELDS = new Set(['stockValueAdded', 'inputGstClaimed']);
 const QTY_KEYS = /(qty|qtychange|^system|^counted|difference)$/i;
 
 /** Formats a recorded value using its field name: paise as rupees, milli-units as quantities, basis points as %. */
@@ -161,7 +171,7 @@ export function formatFieldValue(key: string, value: unknown): string | null {
   if (typeof value !== 'number') return null;
   if (/Bp$/.test(leaf)) return `${value / 100}%`;
   if (leaf === 'movementId') return String(value);
-  if (MONEY_KEYS.test(leaf)) return formatMoney(value);
+  if (MONEY_KEYS.test(leaf) || MONEY_FIELDS.has(leaf)) return formatMoney(value);
   if (QTY_KEYS.test(leaf)) return formatQty(value);
   return null;
 }

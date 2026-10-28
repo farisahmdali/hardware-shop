@@ -12,7 +12,7 @@ import { proportionalShare, type Discount } from '@shared/billing';
 import { claimsInputGst, computePurchase } from '@shared/purchasing';
 import { formatMoney, mulDivRound } from '@shared/money';
 import { formatQty, QTY_SCALE } from '@shared/qty';
-import type { DebitNoteSummary, Paged, PurchaseDetail, PurchaseLineDetail, PurchaseRow, PurchaseSettlement, PurchaseStatus } from '@shared/contracts';
+import type { DebitNoteSummary, Paged, PurchaseDetail, PurchaseLineDetail, PurchaseRow, PurchaseSettlement, PurchaseStatus, PurchaseVersion } from '@shared/contracts';
 
 export interface PurchaseInput {
   requestId: string;
@@ -71,7 +71,24 @@ export function createPurchase(env: AppEnv, actor: Actor, input: PurchaseInput) 
   return transact(env, actor, (tx) => tx.once(input.requestId, 'purchases.create', () => createPurchaseTx(tx, input)));
 }
 
-function createPurchaseTx(tx: Tx, input: PurchaseInput) {
+/** A purchase bill as entered, without the payments made at entry. */
+export type PurchaseBillInput = Omit<PurchaseInput, 'requestId' | 'payments'>;
+
+interface PreparedPurchase {
+  input: PurchaseBillInput;
+  supplier: SupplierForPurchase;
+  products: ProductForPurchase[];
+  calc: ReturnType<typeof computePurchase>;
+  interstate: boolean;
+  itcClaimed: boolean;
+  shopStateCode: string;
+}
+
+/**
+ * Checks a bill and works out its amounts exactly as they will be recorded. `replacing` is the
+ * purchase an edit replaces: its own supplier bill number is not a duplicate.
+ */
+function preparePurchase(tx: Tx, input: PurchaseBillInput, opts: { replacing?: number } = {}): PreparedPurchase {
   const settings = getAllSettings(tx.db);
   const supplier = tx.db.prepare('SELECT * FROM suppliers WHERE id = ?').get(input.supplierId) as SupplierForPurchase | undefined;
   if (!supplier) throw new AppError(ErrorCodes.NOT_FOUND, 'Supplier not found.');
@@ -83,9 +100,9 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
     const dup = tx.db
       .prepare(
         `SELECT p.purchase_no FROM purchases p LEFT JOIN purchase_cancellations c ON c.purchase_id = p.id
-         WHERE p.supplier_id = ? AND p.supplier_invoice_no = ? COLLATE NOCASE AND c.id IS NULL`,
+         WHERE p.supplier_id = ? AND p.supplier_invoice_no = ? COLLATE NOCASE AND c.id IS NULL AND p.id != ?`,
       )
-      .get(supplier.id, input.supplierInvoiceNo) as { purchase_no: string } | undefined;
+      .get(supplier.id, input.supplierInvoiceNo, opts.replacing ?? 0) as { purchase_no: string } | undefined;
     if (dup) {
       throw new AppError(ErrorCodes.CONFLICT, `Bill ${input.supplierInvoiceNo} from ${supplier.name} is already recorded as ${dup.purchase_no}.`);
     }
@@ -122,7 +139,6 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
     roundOff: input.roundOff,
     itcClaimed,
   });
-  const { bill } = calc;
   if (calc.grandTotal < 0) throw new AppError(ErrorCodes.VALIDATION, 'The bill total cannot be negative.');
   if (calc.grandTotal !== input.expectedGrandTotal) {
     throw new AppError(
@@ -130,25 +146,17 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
       `The bill total works out to ${formatMoney(calc.grandTotal)}, not ${formatMoney(input.expectedGrandTotal)}. Review the bill and try again.`,
     );
   }
-  const paid = input.payments.reduce((a, p) => a + p.amount, 0);
-  if (paid > calc.grandTotal) throw new AppError(ErrorCodes.VALIDATION, 'The payments are more than the bill total.');
+  return { input, supplier, products, calc, interstate, itcClaimed, shopStateCode: settings.shop.stateCode };
+}
 
-  // ---- Stock received at landed cost ----
-  const purchaseId = reservePurchaseId(tx);
-  const purchaseNo = tx.nextDocNumber('PURCHASE');
-  const movements = input.lines.map((l, i) =>
-    recordMovement(tx, {
-      productId: l.productId,
-      type: 'PURCHASE',
-      qtyChange: l.qty,
-      costValue: calc.landed[i]!,
-      unitCost: mulDivRound(calc.landed[i]!, QTY_SCALE, l.qty),
-      refType: 'PURCHASE',
-      refId: purchaseId,
-      counterAccount: null,
-    }),
-  );
-
+/** Writes the bill and its lines. `movementIds` are the stock movements of the lines, in order. */
+function insertPurchase(
+  tx: Tx,
+  prep: PreparedPurchase,
+  rec: { id: number; purchaseNo: string; requestId: string; receivedAt: string; businessDate: string; movementIds: number[] },
+): void {
+  const { input, supplier, products, calc } = prep;
+  const { bill } = calc;
   const dueDate = addDays(input.supplierInvoiceDate, supplierCreditDays(tx.db, supplier));
   tx.db
     .prepare(
@@ -159,19 +167,19 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      purchaseId,
-      purchaseNo,
-      input.requestId,
+      rec.id,
+      rec.purchaseNo,
+      rec.requestId,
       supplier.id,
       supplier.name,
       supplier.gstin,
       supplier.state_code,
       input.supplierInvoiceNo,
       input.supplierInvoiceDate,
-      settings.shop.stateCode,
-      interstate ? 1 : 0,
+      prep.shopStateCode,
+      prep.interstate ? 1 : 0,
       input.pricesIncludeTax ? 1 : 0,
-      itcClaimed ? 1 : 0,
+      prep.itcClaimed ? 1 : 0,
       bill.grossTotal,
       bill.discountTotal,
       bill.taxableTotal,
@@ -183,8 +191,8 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
       input.roundOff,
       calc.grandTotal,
       calc.inventoryValue,
-      tx.nowIso,
-      tx.businessDate,
+      rec.receivedAt,
+      rec.businessDate,
       dueDate,
       input.notes,
       tx.actor.userId,
@@ -199,7 +207,7 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
     const p = products[i]!;
     const r = bill.lines[i]!;
     lineStmt.run(
-      purchaseId,
+      rec.id,
       i + 1,
       p.id,
       p.sku,
@@ -219,20 +227,82 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
       r.lineTotal,
       calc.additionalShare[i]!,
       calc.landed[i]!,
-      movements[i]!.id,
+      rec.movementIds[i]!,
     );
   });
+}
 
-  // ---- What the shop now owes ----
+/** The accounting entry of a bill: stock, recoverable GST and round-off against what the shop owes. */
+function postPurchase(tx: Tx, prep: PreparedPurchase, purchaseId: number, purchaseNo: string, businessDate?: string): void {
+  const { bill } = prep.calc;
   const tax = bill.cgstTotal + bill.sgstTotal + bill.igstTotal;
   const lines: LedgerLine[] = [
-    { account: 'INVENTORY', debit: calc.inventoryValue },
-    { account: 'INPUT_GST', debit: itcClaimed ? tax : 0 },
-    { account: 'ROUND_OFF', debit: Math.max(0, input.roundOff) },
-    { account: 'ROUND_OFF', credit: Math.max(0, -input.roundOff) },
-    { account: 'AP', credit: calc.grandTotal, partyType: 'SUPPLIER', partyId: supplier.id },
+    { account: 'INVENTORY', debit: prep.calc.inventoryValue },
+    { account: 'INPUT_GST', debit: prep.itcClaimed ? tax : 0 },
+    { account: 'ROUND_OFF', debit: Math.max(0, prep.input.roundOff) },
+    { account: 'ROUND_OFF', credit: Math.max(0, -prep.input.roundOff) },
+    { account: 'AP', credit: prep.calc.grandTotal, partyType: 'SUPPLIER', partyId: prep.supplier.id },
   ];
-  postLedger(tx, { refType: 'PURCHASE', refId: purchaseId, memo: `Purchase ${purchaseNo} from ${supplier.name}`, lines });
+  postLedger(tx, { refType: 'PURCHASE', refId: purchaseId, memo: `Purchase ${purchaseNo} from ${prep.supplier.name}`, businessDate, lines });
+}
+
+/** The products' purchase price follows the latest landed cost. */
+function updatePurchasePricesFrom(tx: Tx, prep: PreparedPurchase, purchaseId: number, purchaseNo: string): void {
+  const latest = new Map<number, { product: ProductForPurchase; unitCost: number }>();
+  prep.input.lines.forEach((l, i) =>
+    latest.set(l.productId, { product: prep.products[i]!, unitCost: mulDivRound(prep.calc.landed[i]!, QTY_SCALE, l.qty) }),
+  );
+  for (const { product, unitCost } of latest.values()) {
+    const current = (tx.db.prepare('SELECT purchase_price FROM products WHERE id = ?').get(product.id) as { purchase_price: number }).purchase_price;
+    if (unitCost === current) continue;
+    tx.db.prepare('UPDATE products SET purchase_price = ?, updated_at = ?, version = version + 1 WHERE id = ?').run(unitCost, tx.nowIso, product.id);
+    tx.audit({
+      module: 'products',
+      entityType: 'product',
+      entityId: product.id,
+      action: 'COST_UPDATED',
+      before: { purchasePrice: current },
+      after: { purchasePrice: unitCost },
+      reason: `Latest cost from purchase ${purchaseNo}`,
+      relatedType: 'purchase',
+      relatedId: purchaseId,
+    });
+  }
+}
+
+function createPurchaseTx(tx: Tx, input: PurchaseInput) {
+  const prep = preparePurchase(tx, input);
+  const { supplier, calc, itcClaimed } = prep;
+  const { bill } = calc;
+  const paid = input.payments.reduce((a, p) => a + p.amount, 0);
+  if (paid > calc.grandTotal) throw new AppError(ErrorCodes.VALIDATION, 'The payments are more than the bill total.');
+
+  // ---- Stock received at landed cost ----
+  const purchaseId = reservePurchaseId(tx);
+  const purchaseNo = tx.nextDocNumber('PURCHASE');
+  const movements = input.lines.map((l, i) =>
+    recordMovement(tx, {
+      productId: l.productId,
+      type: 'PURCHASE',
+      qtyChange: l.qty,
+      costValue: calc.landed[i]!,
+      unitCost: mulDivRound(calc.landed[i]!, QTY_SCALE, l.qty),
+      refType: 'PURCHASE',
+      refId: purchaseId,
+      counterAccount: null,
+    }),
+  );
+
+  insertPurchase(tx, prep, {
+    id: purchaseId,
+    purchaseNo,
+    requestId: input.requestId,
+    receivedAt: tx.nowIso,
+    businessDate: tx.businessDate,
+    movementIds: movements.map((m) => m.id),
+  });
+  postPurchase(tx, prep, purchaseId, purchaseNo);
+  const tax = bill.cgstTotal + bill.sgstTotal + bill.igstTotal;
 
   // ---- Paid now, then any advance already with the supplier ----
   input.payments.forEach((p, i) => {
@@ -249,28 +319,7 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
   });
   const fromAdvance = applySupplierCreditFifo(tx, supplier.id, { onlyTarget: { type: 'PURCHASE', id: purchaseId } });
 
-  // ---- The products' purchase price follows the latest landed cost ----
-  if (input.updatePurchasePrices) {
-    const latest = new Map<number, { product: ProductForPurchase; unitCost: number }>();
-    input.lines.forEach((l, i) => latest.set(l.productId, { product: products[i]!, unitCost: mulDivRound(calc.landed[i]!, QTY_SCALE, l.qty) }));
-    for (const { product, unitCost } of latest.values()) {
-      if (unitCost === product.purchase_price) continue;
-      tx.db
-        .prepare('UPDATE products SET purchase_price = ?, updated_at = ?, version = version + 1 WHERE id = ?')
-        .run(unitCost, tx.nowIso, product.id);
-      tx.audit({
-        module: 'products',
-        entityType: 'product',
-        entityId: product.id,
-        action: 'COST_UPDATED',
-        before: { purchasePrice: product.purchase_price },
-        after: { purchasePrice: unitCost },
-        reason: `Latest cost from purchase ${purchaseNo}`,
-        relatedType: 'purchase',
-        relatedId: purchaseId,
-      });
-    }
-  }
+  if (input.updatePurchasePrices) updatePurchasePricesFrom(tx, prep, purchaseId, purchaseNo);
 
   const outstanding = calc.grandTotal - paid - fromAdvance;
   tx.audit({
@@ -296,9 +345,48 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
 
 // ---------- Cancelling a purchase ----------
 
+/**
+ * Reverses a recorded bill's accounting entry. `removed` is the stock value taken out for it now;
+ * `kept` the value of its goods left in stock untouched (an edit that did not change them). The
+ * difference between the bill's stock value and those goes to stock adjustments. Returns it.
+ */
+function postReversal(
+  tx: Tx,
+  p: PurchaseRecord,
+  o: { refType: 'PURCHASE_CANCEL' | 'PURCHASE_REVISED'; memo: string; removed: number; kept: number; businessDate?: string },
+): number {
+  const tax = p.cgst_total + p.sgst_total + p.igst_total;
+  const difference = p.inventory_value - o.kept - o.removed;
+  postLedger(tx, {
+    refType: o.refType,
+    refId: p.id,
+    memo: o.memo,
+    businessDate: o.businessDate,
+    lines: [
+      { account: 'AP', debit: p.grand_total, partyType: 'SUPPLIER', partyId: p.supplier_id },
+      { account: 'ROUND_OFF', debit: Math.max(0, -p.round_off) },
+      { account: 'INVENTORY', credit: o.removed + o.kept },
+      { account: 'INPUT_GST', credit: p.itc_claimed ? tax : 0 },
+      { account: 'ROUND_OFF', credit: Math.max(0, p.round_off) },
+      { account: 'INVENTORY_LOSS', credit: Math.max(0, difference) },
+      { account: 'INVENTORY_LOSS', debit: Math.max(0, -difference) },
+    ],
+  });
+  return difference;
+}
+
+/** The version that replaced a purchase, if it was edited. */
+function replacedBy(db: Db, purchaseId: number): { id: number; purchase_no: string } | undefined {
+  return db
+    .prepare('SELECT p.id, p.purchase_no FROM purchase_revisions r JOIN purchases p ON p.id = r.revised_purchase_id WHERE r.purchase_id = ?')
+    .get(purchaseId) as { id: number; purchase_no: string } | undefined;
+}
+
 interface PurchaseRecord {
   id: number;
   purchase_no: string;
+  business_date: string;
+  received_at: string;
   supplier_id: number;
   supplier_name: string;
   supplier_invoice_no: string;
@@ -348,6 +436,8 @@ export function cancelPurchase(env: AppEnv, actor: Actor, input: { id: number; r
   transact(env, actor, (tx) =>
     tx.once(input.requestId, 'purchases.cancel', () => {
       const p = loadPurchase(tx.db, input.id);
+      const current = replacedBy(tx.db, p.id);
+      if (current) throw new AppError(ErrorCodes.BUSINESS_RULE, `${p.purchase_no} was edited; the bill is now ${current.purchase_no}. Cancel that one instead.`);
       if (tx.db.prepare('SELECT 1 FROM purchase_cancellations WHERE purchase_id = ?').get(p.id)) {
         throw new AppError(ErrorCodes.BUSINESS_RULE, `${p.purchase_no} is already cancelled.`);
       }
@@ -394,22 +484,7 @@ export function cancelPurchase(env: AppEnv, actor: Actor, input: { id: number; r
         removed += -m.costValue;
       }
 
-      const tax = p.cgst_total + p.sgst_total + p.igst_total;
-      const difference = p.inventory_value - removed;
-      postLedger(tx, {
-        refType: 'PURCHASE_CANCEL',
-        refId: p.id,
-        memo: `Purchase ${p.purchase_no} cancelled: ${input.reason}`,
-        lines: [
-          { account: 'AP', debit: p.grand_total, partyType: 'SUPPLIER', partyId: p.supplier_id },
-          { account: 'ROUND_OFF', debit: Math.max(0, -p.round_off) },
-          { account: 'INVENTORY', credit: removed },
-          { account: 'INPUT_GST', credit: p.itc_claimed ? tax : 0 },
-          { account: 'ROUND_OFF', credit: Math.max(0, p.round_off) },
-          { account: 'INVENTORY_LOSS', credit: Math.max(0, difference) },
-          { account: 'INVENTORY_LOSS', debit: Math.max(0, -difference) },
-        ],
-      });
+      const difference = postReversal(tx, p, { refType: 'PURCHASE_CANCEL', memo: `Purchase ${p.purchase_no} cancelled: ${input.reason}`, removed, kept: 0 });
       tx.db
         .prepare('INSERT INTO purchase_cancellations (purchase_id, reason, user_id, cancelled_at, business_date, txn_ref) VALUES (?, ?, ?, ?, ?, ?)')
         .run(p.id, input.reason, tx.actor.userId, tx.nowIso, tx.businessDate, tx.txnRef);
@@ -426,6 +501,224 @@ export function cancelPurchase(env: AppEnv, actor: Actor, input: { id: number; r
       return p.id;
     }),
   );
+}
+
+// ---------- Editing a purchase ----------
+
+export interface PurchaseEditInput extends PurchaseBillInput {
+  requestId: string;
+  /** The version being edited; refused if it has been edited since. */
+  id: number;
+  reason: string;
+}
+
+/** What a version of a bill says, for the before/after of an edit in the history. */
+function purchaseSnapshot(db: Db, id: number) {
+  const p = db.prepare('SELECT * FROM purchases WHERE id = ?').get(id) as PurchaseRecord & {
+    supplier_name: string;
+    prices_include_tax: number;
+    additional_costs: number;
+    additional_costs_note: string;
+    notes: string;
+  };
+  const lines = db
+    .prepare('SELECT name, sku, unit_code, qty, unit_cost, gst_rate_bp, line_discount, bill_discount FROM purchase_lines WHERE purchase_id = ? ORDER BY line_no')
+    .all(id) as { name: string; sku: string; unit_code: string; qty: number; unit_cost: number; gst_rate_bp: number; line_discount: number; bill_discount: number }[];
+  const items: Record<string, string> = {};
+  for (const l of lines) {
+    let key = `${l.name} (${l.sku})`;
+    for (let n = 2; key in items; n++) key = `${l.name} (${l.sku}) #${n}`;
+    const discount = l.line_discount + l.bill_discount;
+    items[key] =
+      `${formatQty(l.qty)} ${l.unit_code} at ${formatMoney(l.unit_cost)}` +
+      (l.gst_rate_bp ? `, GST ${l.gst_rate_bp / 100}%` : '') +
+      (discount ? `, less ${formatMoney(discount)}` : '');
+  }
+  return {
+    supplier: p.supplier_name,
+    supplierInvoiceNo: p.supplier_invoice_no,
+    supplierInvoiceDate: p.supplier_invoice_date,
+    ratesIncludeGst: p.prices_include_tax === 1,
+    items,
+    freightAmount: p.additional_costs,
+    freightNote: p.additional_costs_note,
+    roundOffAmount: p.round_off,
+    notes: p.notes,
+    grandTotal: p.grand_total,
+    stockValueAdded: p.inventory_value,
+    inputGstClaimed: p.itc_claimed ? p.cgst_total + p.sgst_total + p.igst_total : 0,
+  };
+}
+
+/**
+ * Edits a purchase. Recorded bills are never changed: the corrected bill is saved as a new version
+ * (numbered like the original with -R2, -R3, ...), and the version it replaces is reversed and kept,
+ * marked as replaced. Both accounting entries are dated on the bill's own day, so the accounts
+ * read as if it had been entered correctly. Stock moves only for products whose quantity or cost
+ * changed: what this bill brought in is taken out (at its own cost when nothing else has happened
+ * to the product since, otherwise at the average cost, with the difference to stock adjustments)
+ * and the corrected quantity brought in at the corrected cost. Payments made against the bill
+ * settle the new version. The history records the edit with every change, who made it and why.
+ */
+export function editPurchase(env: AppEnv, actor: Actor, input: PurchaseEditInput) {
+  return transact(env, actor, (tx) => tx.once(input.requestId, 'purchases.edit', () => editPurchaseTx(tx, input)));
+}
+
+function editPurchaseTx(tx: Tx, input: PurchaseEditInput) {
+  const old = loadPurchase(tx.db, input.id);
+  const current = replacedBy(tx.db, old.id);
+  if (current) {
+    throw new AppError(ErrorCodes.CONFLICT, `${old.purchase_no} has already been edited; the bill is now ${current.purchase_no}. Open that one to edit it again.`);
+  }
+  if (tx.db.prepare('SELECT 1 FROM purchase_cancellations WHERE purchase_id = ?').get(old.id)) {
+    throw new AppError(ErrorCodes.BUSINESS_RULE, `${old.purchase_no} was cancelled and cannot be edited.`);
+  }
+  const dn = tx.db.prepare('SELECT debit_note_no FROM debit_notes WHERE purchase_id = ? LIMIT 1').get(old.id) as { debit_note_no: string } | undefined;
+  if (dn) {
+    throw new AppError(ErrorCodes.BUSINESS_RULE, `Goods from ${old.purchase_no} were returned to the supplier (${dn.debit_note_no}), so the bill can no longer be edited.`);
+  }
+  const prep = preparePurchase(tx, input, { replacing: old.id });
+  const { calc } = prep;
+
+  const chain = tx.db.prepare('SELECT original_purchase_id AS originalId, revision FROM purchase_revisions WHERE revised_purchase_id = ?').get(old.id) as
+    | { originalId: number; revision: number }
+    | undefined;
+  const originalId = chain?.originalId ?? old.id;
+  const revision = (chain?.revision ?? 1) + 1;
+  const originalNo = (tx.db.prepare('SELECT purchase_no FROM purchases WHERE id = ?').get(originalId) as { purchase_no: string }).purchase_no;
+  const purchaseNo = `${originalNo}-R${revision}`;
+  const newId = reservePurchaseId(tx);
+
+  // ---- Which products move: only those whose quantity or cost changed ----
+  const oldLines = tx.db.prepare(LINES_SQL).all(old.id) as PurchaseLineRecord[];
+  const before = new Map<number, { qty: number; value: number; lastMovement: number; name: string; unit: string }>();
+  for (const l of oldLines) {
+    const b = before.get(l.product_id) ?? { qty: 0, value: 0, lastMovement: 0, name: l.name, unit: l.unit_code };
+    b.qty += l.qty;
+    b.value += l.landed_value;
+    b.lastMovement = Math.max(b.lastMovement, l.movement_id);
+    before.set(l.product_id, b);
+  }
+  const after = new Map<number, { qty: number; value: number }>();
+  input.lines.forEach((l, i) => {
+    const a = after.get(l.productId) ?? { qty: 0, value: 0 };
+    a.qty += l.qty;
+    a.value += calc.landed[i]!;
+    after.set(l.productId, a);
+  });
+  const changed = new Set<number>();
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    const b = before.get(id);
+    const a = after.get(id);
+    if (!b || !a || b.qty !== a.qty || b.value !== a.value) changed.add(id);
+  }
+
+  // Taking this bill's goods out first restores their exact cost, but needs them still in stock;
+  // when some have been sold, the corrected goods come in first.
+  const balance = tx.db.prepare('SELECT qty, last_movement_id FROM stock_balances WHERE product_id = ?');
+  let removeFirst = true;
+  const untouched = new Set<number>();
+  for (const id of changed) {
+    const b = before.get(id);
+    if (!b) continue;
+    const stock = balance.get(id) as { qty: number; last_movement_id: number };
+    const newQty = after.get(id)?.qty ?? 0;
+    if (stock.qty + newQty < b.qty) {
+      throw new AppError(
+        ErrorCodes.BUSINESS_RULE,
+        `${formatQty(b.qty - stock.qty)} ${b.unit} of ${b.name} from this bill has already been sold or used, so the corrected bill must bring in at least that much ` +
+          `(it now has ${formatQty(newQty)} ${b.unit}).`,
+      );
+    }
+    if (stock.qty < b.qty) removeFirst = false;
+    if (stock.last_movement_id === b.lastMovement) untouched.add(id);
+  }
+
+  const movementReason = `${old.purchase_no} edited, now ${purchaseNo}: ${input.reason}`;
+  let removed = 0;
+  const takeOut = () => {
+    for (const l of [...oldLines].reverse()) {
+      if (!changed.has(l.product_id)) continue;
+      const m = recordMovement(tx, {
+        productId: l.product_id,
+        type: 'PURCHASE_CANCEL',
+        qtyChange: -l.qty,
+        costValue: removeFirst && untouched.has(l.product_id) ? -l.landed_value : undefined,
+        reason: movementReason,
+        refType: 'PURCHASE',
+        refId: old.id,
+        counterAccount: null,
+      });
+      removed += -m.costValue;
+    }
+  };
+  // Lines of products that did not change keep pointing at the movement that brought them in.
+  const movementIds = input.lines.map((l) => before.get(l.productId)?.lastMovement ?? 0);
+  const bringIn = () => {
+    input.lines.forEach((l, i) => {
+      if (!changed.has(l.productId)) return;
+      const m = recordMovement(tx, {
+        productId: l.productId,
+        type: 'PURCHASE',
+        qtyChange: l.qty,
+        costValue: calc.landed[i]!,
+        unitCost: mulDivRound(calc.landed[i]!, QTY_SCALE, l.qty),
+        reason: movementReason,
+        refType: 'PURCHASE',
+        refId: newId,
+        counterAccount: null,
+      });
+      movementIds[i] = m.id;
+    });
+  };
+  if (removeFirst) {
+    takeOut();
+    bringIn();
+  } else {
+    bringIn();
+    takeOut();
+  }
+  const kept = oldLines.filter((l) => !changed.has(l.product_id)).reduce((a, l) => a + l.landed_value, 0);
+
+  // ---- The replaced version is reversed and kept; the corrected version recorded ----
+  tx.db
+    .prepare('INSERT INTO purchase_cancellations (purchase_id, reason, user_id, cancelled_at, business_date, txn_ref) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(old.id, `Replaced by ${purchaseNo} (edited): ${input.reason}`, tx.actor.userId, tx.nowIso, tx.businessDate, tx.txnRef);
+  const difference = postReversal(tx, old, {
+    refType: 'PURCHASE_REVISED',
+    memo: `Purchase ${old.purchase_no} edited, replaced by ${purchaseNo}: ${input.reason}`,
+    removed,
+    kept,
+    businessDate: old.business_date,
+  });
+  insertPurchase(tx, prep, { id: newId, purchaseNo, requestId: input.requestId, receivedAt: old.received_at, businessDate: old.business_date, movementIds });
+  postPurchase(tx, prep, newId, purchaseNo, old.business_date);
+  releaseSupplierTarget(tx, { type: 'PURCHASE', id: old.id }, `Purchase ${old.purchase_no} replaced by ${purchaseNo}`);
+  applySupplierCreditFifo(tx, prep.supplier.id, { onlyTarget: { type: 'PURCHASE', id: newId } });
+  if (input.updatePurchasePrices) updatePurchasePricesFrom(tx, prep, newId, purchaseNo);
+  tx.db
+    .prepare(
+      `INSERT INTO purchase_revisions (purchase_id, revised_purchase_id, original_purchase_id, revision, reason, user_id, revised_at, business_date, txn_ref)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(old.id, newId, originalId, revision, input.reason, tx.actor.userId, tx.nowIso, tx.businessDate, tx.txnRef);
+
+  const was = purchaseSnapshot(tx.db, old.id);
+  const now = purchaseSnapshot(tx.db, newId);
+  if (JSON.stringify(was) === JSON.stringify(now)) throw new AppError(ErrorCodes.BUSINESS_RULE, 'Nothing on the bill was changed.');
+  tx.audit({
+    module: 'purchases',
+    entityType: 'purchase',
+    entityId: newId,
+    action: 'EDIT',
+    before: { purchaseNo: old.purchase_no, ...was },
+    after: { purchaseNo, ...now, stockAdjustmentAmount: difference },
+    reason: input.reason,
+    relatedType: 'purchase',
+    relatedId: old.id,
+  });
+  const outstanding = payableOutstanding(tx.db, 'PURCHASE', newId);
+  return { purchaseId: newId, purchaseNo, grandTotal: calc.grandTotal, outstanding };
 }
 
 // ---------- Supplier returns (debit notes) ----------
@@ -453,6 +746,8 @@ export function createSupplierReturn(
   return transact(env, actor, (tx) =>
     tx.once(input.requestId, 'supplierReturns.create', () => {
       const p = loadPurchase(tx.db, input.purchaseId);
+      const current = replacedBy(tx.db, p.id);
+      if (current) throw new AppError(ErrorCodes.BUSINESS_RULE, `${p.purchase_no} was edited; return the goods against ${current.purchase_no}.`);
       if (tx.db.prepare('SELECT 1 FROM purchase_cancellations WHERE purchase_id = ?').get(p.id)) {
         throw new AppError(ErrorCodes.BUSINESS_RULE, `${p.purchase_no} was cancelled; nothing can be returned against it.`);
       }
@@ -601,14 +896,17 @@ interface PurchaseListRecord {
   grand_total: number;
   outstanding: number;
   cancelled: number;
+  replaced: number;
   items: number;
   returned: number;
   username: string | null;
 }
 
+const REPLACED = 'EXISTS (SELECT 1 FROM purchase_revisions r WHERE r.purchase_id = p.id)';
+
 const LIST_SELECT = `
   SELECT p.id, p.purchase_no, p.supplier_id, s.name AS supplier_name, p.supplier_invoice_no, p.supplier_invoice_date,
-         p.business_date, p.due_date, p.grand_total, b.outstanding, b.cancelled, u.username,
+         p.business_date, p.due_date, p.grand_total, b.outstanding, b.cancelled, ${REPLACED} AS replaced, u.username,
          (SELECT COUNT(*) FROM purchase_lines l WHERE l.purchase_id = p.id) AS items,
          COALESCE((SELECT SUM(d.total) FROM debit_notes d WHERE d.purchase_id = p.id), 0) AS returned
   FROM purchases p
@@ -616,7 +914,8 @@ const LIST_SELECT = `
   JOIN v_purchase_balances b ON b.purchase_id = p.id
   LEFT JOIN users u ON u.id = p.user_id`;
 
-function statusOf(r: { cancelled: number; outstanding: number; grand_total: number }): PurchaseStatus {
+function statusOf(r: { cancelled: number; replaced: number; outstanding: number; grand_total: number }): PurchaseStatus {
+  if (r.replaced) return 'REPLACED';
   if (r.cancelled) return 'CANCELLED';
   if (r.outstanding <= 0) return 'PAID';
   return r.outstanding < r.grand_total ? 'PARTIAL' : 'UNPAID';
@@ -646,7 +945,7 @@ export function listPurchases(
     search?: string;
     supplierId?: number;
     productId?: number;
-    status: 'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID' | 'OPEN' | 'OVERDUE' | 'CANCELLED';
+    status: 'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID' | 'OPEN' | 'OVERDUE' | 'CANCELLED' | 'REPLACED';
     from?: string;
     to?: string;
     page: number;
@@ -656,6 +955,8 @@ export function listPurchases(
 ): Paged<PurchaseRow> {
   const where: string[] = [];
   const params: unknown[] = [];
+  // Earlier versions of edited bills are listed only when asked for; the current version stands for the bill.
+  where.push(f.status === 'REPLACED' ? REPLACED : `NOT ${REPLACED}`);
   if (f.supplierId) {
     where.push('p.supplier_id = ?');
     params.push(f.supplierId);
@@ -796,6 +1097,7 @@ export function getPurchase(db: Db, id: number, asOf: string): PurchaseDetail {
   const c = db
     .prepare('SELECT c.cancelled_at, c.reason, u.username FROM purchase_cancellations c LEFT JOIN users u ON u.id = c.user_id WHERE c.purchase_id = ?')
     .get(id) as { cancelled_at: string; reason: string; username: string | null } | undefined;
+  const { version, versions, replacedBy: replaced } = purchaseVersions(db, id);
   return {
     ...toRow(r, asOf),
     supplierGstin: p.supplier_gstin,
@@ -818,6 +1120,37 @@ export function getPurchase(db: Db, id: number, asOf: string): PurchaseDetail {
     lines,
     settlements,
     debitNotes,
-    cancellation: c ? { at: c.cancelled_at, reason: c.reason, username: c.username } : null,
+    cancellation: c && !replaced ? { at: c.cancelled_at, reason: c.reason, username: c.username } : null,
+    version,
+    versions,
+    replacedBy: replaced,
+  };
+}
+
+/** The versions of the bill a purchase belongs to, and the edit that replaced it, if any. */
+function purchaseVersions(db: Db, id: number): Pick<PurchaseDetail, 'version' | 'versions' | 'replacedBy'> {
+  const own = db.prepare('SELECT original_purchase_id AS originalId FROM purchase_revisions WHERE revised_purchase_id = ?').get(id) as
+    | { originalId: number }
+    | undefined;
+  const originalId = own?.originalId ?? id;
+  const first = db
+    .prepare('SELECT p.id, p.purchase_no, p.received_at, u.username FROM purchases p LEFT JOIN users u ON u.id = p.user_id WHERE p.id = ?')
+    .get(originalId) as { id: number; purchase_no: string; received_at: string; username: string | null };
+  const edits = db
+    .prepare(
+      `SELECT r.purchase_id, r.revised_purchase_id, r.revision, r.reason, r.revised_at, p.purchase_no, u.username
+       FROM purchase_revisions r JOIN purchases p ON p.id = r.revised_purchase_id LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.original_purchase_id = ? ORDER BY r.revision`,
+    )
+    .all(originalId) as { purchase_id: number; revised_purchase_id: number; revision: number; reason: string; revised_at: string; purchase_no: string; username: string | null }[];
+  const versions: PurchaseVersion[] = [
+    { id: first.id, purchaseNo: first.purchase_no, version: 1, savedAt: first.received_at, username: first.username, reason: null },
+    ...edits.map((e) => ({ id: e.revised_purchase_id, purchaseNo: e.purchase_no, version: e.revision, savedAt: e.revised_at, username: e.username, reason: e.reason })),
+  ];
+  const next = edits.find((e) => e.purchase_id === id);
+  return {
+    version: versions.find((v) => v.id === id)?.version ?? 1,
+    versions,
+    replacedBy: next ? { id: next.revised_purchase_id, purchaseNo: next.purchase_no, at: next.revised_at, username: next.username, reason: next.reason } : null,
   };
 }

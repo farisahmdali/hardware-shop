@@ -151,7 +151,10 @@ describe('upgrading the database', () => {
 
     expect(await upgradeDatabase(env)).toEqual([LATEST_SCHEMA_VERSION]);
     expect(schemaVersion(env.db)).toBe(LATEST_SCHEMA_VERSION);
-    expect(snapshotTables(env.db, notCompared)).toEqual(before);
+    // Every table that existed keeps exactly its rows; tables added by the upgrade start empty.
+    const after = snapshotTables(env.db, notCompared);
+    for (const [table, rows] of Object.entries(before)) expect({ table, rows: after[table] }).toEqual({ table, rows });
+    for (const table of Object.keys(after).filter((t) => !(t in before))) expect({ table, rows: after[table] }).toEqual({ table, rows: [] });
     const historyAfter = env.db.prepare('SELECT * FROM audit_log ORDER BY id').all();
     expect(historyAfter.slice(0, historyBefore.length)).toEqual(historyBefore);
     expect(historyAfter.slice(historyBefore.length).map((a) => (a as { action: string }).action)).toEqual(['BACKUP_CREATED']);

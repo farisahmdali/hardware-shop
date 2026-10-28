@@ -169,7 +169,7 @@ const auditFilter = z.object({
   entityType: z.string().max(40).optional(),
   entityId: z.string().max(40).optional(),
   /** A record and everything linked to it. */
-  record: z.object({ type: z.string().max(40), id: z.string().max(40) }).optional(),
+  record: z.object({ type: z.string().max(40), id: z.string().max(40), alsoIds: z.array(z.string().max(40)).max(50).optional() }).optional(),
   action: z.string().max(60).optional(),
   userId: z.number().int().positive().optional(),
   txnRef: z.string().max(60).optional(),

@@ -38,7 +38,8 @@ export interface SupplierDetail extends SupplierRow {
 /** Running supplier account. Credits are what the shop owes; the balance is positive when the shop owes. */
 export type SupplierLedger = CustomerLedger;
 
-export type PurchaseStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'CANCELLED';
+/** REPLACED: an earlier version of a bill that was edited; the newer version counts instead. */
+export type PurchaseStatus = 'PAID' | 'PARTIAL' | 'UNPAID' | 'CANCELLED' | 'REPLACED';
 
 export interface PurchaseRow {
   id: number;
@@ -125,6 +126,23 @@ export interface PurchaseDetail extends PurchaseRow {
   settlements: PurchaseSettlement[];
   debitNotes: DebitNoteSummary[];
   cancellation: { at: string; reason: string; username: string | null } | null;
+  /** This version's number; 1 is the bill as first entered. */
+  version: number;
+  /** Every version of this bill, oldest first (just this one when it was never edited). */
+  versions: PurchaseVersion[];
+  /** Set on an earlier version: the edit that replaced it. */
+  replacedBy: { id: number; purchaseNo: string; at: string; username: string | null; reason: string } | null;
+}
+
+export interface PurchaseVersion {
+  id: number;
+  purchaseNo: string;
+  version: number;
+  /** When this version was saved: entered (version 1) or edited. */
+  savedAt: string;
+  username: string | null;
+  /** Why the bill was edited into this version; null for the first. */
+  reason: string | null;
 }
 
 export interface SupplierPaymentRow {
@@ -227,6 +245,25 @@ export const purchaseLineInput = z.object({
   discount: discountSchema.default(null),
 });
 
+
+/** A supplier's bill as entered; shared by entering and editing a purchase. */
+const purchaseBillInput = z.object({
+  supplierId: id,
+  supplierInvoiceNo: text(40),
+  supplierInvoiceDate: isoDate,
+  pricesIncludeTax: z.boolean().default(false),
+  lines: z.array(purchaseLineInput).min(1, 'Add at least one item').max(300),
+  billDiscount: discountSchema.default(null),
+  additionalCosts: paise.default(0),
+  additionalCostsNote: text(120),
+  /** Difference to match the supplier's bill total (positive adds to the total). */
+  roundOff: z.number().int().min(-10_000).max(10_000).default(0),
+  notes: text(500),
+  /** Also set each product's purchase price to the new landed cost per unit. */
+  updatePurchasePrices: z.boolean().default(true),
+  expectedGrandTotal: paise,
+});
+
 export const purchaseCommands = {
   'suppliers.list': command<Paged<SupplierRow>>()(
     z.object({
@@ -253,24 +290,10 @@ export const purchaseCommands = {
   ),
 
   'purchases.create': command<{ purchaseId: number; purchaseNo: string; grandTotal: number; outstanding: number }>()(
-    z.object({
+    purchaseBillInput.extend({
       requestId,
-      supplierId: id,
-      supplierInvoiceNo: text(40),
-      supplierInvoiceDate: isoDate,
-      pricesIncludeTax: z.boolean().default(false),
-      lines: z.array(purchaseLineInput).min(1, 'Add at least one item').max(300),
-      billDiscount: discountSchema.default(null),
-      additionalCosts: paise.default(0),
-      additionalCostsNote: text(120),
-      /** Difference to match the supplier's bill total (positive adds to the total). */
-      roundOff: z.number().int().min(-10_000).max(10_000).default(0),
-      notes: text(500),
       /** Paid to the supplier now, at the time of entry. */
       payments: z.array(paymentLine).max(6).default([]),
-      /** Also set each product's purchase price to the new landed cost per unit. */
-      updatePurchasePrices: z.boolean().default(true),
-      expectedGrandTotal: paise,
     }),
   ),
   'purchases.list': command<Paged<PurchaseRow>>()(
@@ -278,7 +301,7 @@ export const purchaseCommands = {
       search: z.string().trim().max(100).optional(),
       supplierId: id.optional(),
       productId: id.optional(),
-      status: z.enum(['ALL', 'PAID', 'PARTIAL', 'UNPAID', 'OPEN', 'OVERDUE', 'CANCELLED']).default('ALL'),
+      status: z.enum(['ALL', 'PAID', 'PARTIAL', 'UNPAID', 'OPEN', 'OVERDUE', 'CANCELLED', 'REPLACED']).default('ALL'),
       from: isoDate.optional(),
       to: isoDate.optional(),
       ...pageInput,
@@ -286,6 +309,10 @@ export const purchaseCommands = {
   ),
   'purchases.get': command<PurchaseDetail>()(z.object({ id })),
   'purchases.cancel': command<PurchaseDetail>()(z.object({ id, reason: reasonRequired, requestId })),
+  /** Saves a corrected version of a bill; the version edited is kept and marked replaced. */
+  'purchases.edit': command<{ purchaseId: number; purchaseNo: string; grandTotal: number; outstanding: number }>()(
+    purchaseBillInput.extend({ requestId, id, reason: reasonRequired }),
+  ),
 
   'supplierReturns.create': command<{ debitNoteId: number; debitNoteNo: string; total: number }>()(
     z.object({

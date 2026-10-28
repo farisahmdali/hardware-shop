@@ -37,6 +37,7 @@ export const IMMUTABLE_TABLES = [
   'purchases',
   'purchase_lines',
   'purchase_cancellations',
+  'purchase_revisions',
   'debit_notes',
   'debit_note_lines',
   'supplier_allocations',
@@ -85,6 +86,7 @@ const AUDITED_TABLES: [table: string, label: string, entityType?: string][] = [
   ['deposit_transactions', 'deposit movements'],
   ['purchases', 'purchases'],
   ['purchase_cancellations', 'purchase cancellations'],
+  ['purchase_revisions', 'purchase edits'],
   ['debit_notes', 'debit notes'],
   ['supplier_adjustments', 'supplier balance adjustments'],
   ['cash_entries', 'cash entries'],
@@ -167,7 +169,8 @@ const checks: IntegrityCheck[] = [
       const triggers = new Set(
         (db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as { name: string }[]).map((r) => r.name),
       );
-      const expected = [...IMMUTABLE_TABLES.flatMap((t) => [`${t}_no_update`, `${t}_no_delete`]), ...REQUIRED_TRIGGERS];
+      // Tables a database from an earlier version does not have yet are not expected.
+      const expected = [...IMMUTABLE_TABLES.filter((t) => tableExists(db, t)).flatMap((t) => [`${t}_no_update`, `${t}_no_delete`]), ...REQUIRED_TRIGGERS];
       return expected
         .filter((name) => !triggers.has(name))
         .map((name) => issue('immutability-triggers', `Protection trigger ${name} is missing; protected records could be altered.`));
@@ -362,6 +365,23 @@ const checks: IntegrityCheck[] = [
         )
         .all();
       return rows.length ? [issue('purchase-totals', `${rows.length} purchase(s) do not add up to their lines.`, rows)] : [];
+    },
+  },
+  {
+    name: 'purchase-revisions',
+    quick: true,
+    run(db) {
+      // Every edited bill's earlier version is reversed, and a version is replaced at most once.
+      if (!tableExists(db, 'purchase_revisions')) return [];
+      const rows = db
+        .prepare(
+          `SELECT r.purchase_id, r.revised_purchase_id FROM purchase_revisions r
+           WHERE NOT EXISTS (SELECT 1 FROM purchase_cancellations c WHERE c.purchase_id = r.purchase_id)
+              OR NOT EXISTS (SELECT 1 FROM purchases p WHERE p.id = r.revised_purchase_id AND p.txn_ref = r.txn_ref)
+           LIMIT 50`,
+        )
+        .all();
+      return rows.length ? [issue('purchase-revisions', `${rows.length} edited purchase(s) are not recorded consistently.`, rows)] : [];
     },
   },
   {

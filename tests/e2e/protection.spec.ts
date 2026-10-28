@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readdirSync as listDir, readFileSync as readText } from 'node:fs';
 import Database from 'better-sqlite3';
 import { completeSetup, launch, newDataDir, stubDialogs } from './app';
 
@@ -144,10 +145,8 @@ test('starting a new version upgrades the data after a backup, and says so while
   await addProduct(page, 'Claw hammer 450 g');
   await app.close();
 
-  // Make the file as the previous version (schema 7) left it: before migration 008's index.
-  const db = new Database(join(dataDir, 'data', 'shop.db'));
-  db.exec('DROP INDEX idx_ledger_party_account; DELETE FROM schema_migrations WHERE version = 8; PRAGMA user_version = 7;');
-  db.close();
+  // Make the file as the previous version left it.
+  const latest = undoLatestMigration(join(dataDir, 'data', 'shop.db'));
 
   ({ app, page } = await launch(dataDir));
   // The first window is the notice (on a small shop it closes again almost at once); the main
@@ -165,6 +164,24 @@ test('starting a new version upgrades the data after a backup, and says so while
   await app.close();
 
   const upgraded = new Database(join(dataDir, 'data', 'shop.db'), { readonly: true });
-  expect(upgraded.pragma('user_version', { simple: true })).toBe(8);
+  expect(upgraded.pragma('user_version', { simple: true })).toBe(latest);
   upgraded.close();
 });
+
+/**
+ * Takes a database back to the previous version by undoing the newest migration: drops what it
+ * created and the columns it added, in reverse order. Migrations are additive (see UPGRADING.md),
+ * so this is all an upgrade adds. Returns the newest migration's version.
+ */
+function undoLatestMigration(path: string): number {
+  const dir = join(__dirname, '../../src/main/db/migrations');
+  const latest = listDir(dir).filter((f) => /^\d+_.+\.sql$/.test(f)).sort().pop()!;
+  const version = Number(/^(\d+)/.exec(latest)![1]);
+  const sql = readText(join(dir, latest), 'utf8');
+  const db = new Database(path);
+  for (const m of [...sql.matchAll(/CREATE\s+(TABLE|INDEX|TRIGGER|VIEW)\s+(\w+)/gi)].reverse()) db.exec(`DROP ${m[1]!.toUpperCase()} IF EXISTS ${m[2]}`);
+  for (const m of [...sql.matchAll(/ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)/gi)].reverse()) db.exec(`ALTER TABLE ${m[1]} DROP COLUMN ${m[2]}`);
+  db.exec(`DELETE FROM schema_migrations WHERE version = ${version}; PRAGMA user_version = ${version - 1};`);
+  db.close();
+  return version;
+}

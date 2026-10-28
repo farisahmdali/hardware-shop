@@ -2,7 +2,7 @@ export const MOVEMENT_TYPES = {
   OPENING: { label: 'Opening stock', direction: 'in' },
   RECEIPT: { label: 'Stock received', direction: 'in' },
   PURCHASE: { label: 'Purchase', direction: 'in' },
-  PURCHASE_CANCEL: { label: 'Purchase cancelled', direction: 'out' },
+  PURCHASE_CANCEL: { label: 'Purchase cancelled or edited', direction: 'out' },
   ADJUST_IN: { label: 'Correction (added)', direction: 'in' },
   ADJUST_OUT: { label: 'Correction (removed)', direction: 'out' },
   DAMAGE: { label: 'Damaged', direction: 'out' },

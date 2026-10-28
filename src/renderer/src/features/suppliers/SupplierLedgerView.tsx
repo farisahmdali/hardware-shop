@@ -28,7 +28,8 @@ export function SupplierLedgerView({ supplierId, supplierName }: { supplierId: n
     to: ledger.data?.to,
     title: `Supplier account · ${supplierName}`,
   };
-  const linkFor = (refType: string, refId: string) => (refType === 'PURCHASE' || refType === 'PURCHASE_CANCEL' ? `/suppliers/purchases/${refId}` : null);
+  const linkFor = (refType: string, refId: string) =>
+    refType === 'PURCHASE' || refType === 'PURCHASE_CANCEL' || refType === 'PURCHASE_REVISED' ? `/suppliers/purchases/${refId}` : null;
 
   return (
     <>

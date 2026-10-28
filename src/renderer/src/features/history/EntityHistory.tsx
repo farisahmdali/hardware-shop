@@ -17,11 +17,25 @@ import { recordHistoryLink } from './links';
  * The complete change history of one record (product, customer, invoice, ...), including entries
  * about records linked to it, such as the payments of a customer.
  */
-export function EntityHistory({ entityType, entityId }: { entityType: string; entityId: string | number }) {
+export function EntityHistory({
+  entityType,
+  entityId,
+  alsoIds,
+}: {
+  entityType: string;
+  entityId: string | number;
+  /** Other records of the same type this one stands for, e.g. the earlier versions of an edited bill. */
+  alsoIds?: (string | number)[];
+}) {
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<number | null>(null);
   const id = String(entityId);
-  const list = useCommandQuery('audit.list', { record: { type: entityType, id }, page, pageSize: 25 }, { placeholderData: (p) => p });
+  const others = (alsoIds ?? []).map(String).filter((x) => x !== id);
+  const list = useCommandQuery(
+    'audit.list',
+    { record: { type: entityType, id, alsoIds: others.length ? others : undefined }, page, pageSize: 25 },
+    { placeholderData: (p) => p },
+  );
 
   if (list.isPending) return <Spinner />;
   if (list.isError) return <div className="p-4"><ErrorBanner message={list.error.message} /></div>;

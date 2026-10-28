@@ -18,6 +18,7 @@ const STATUS: Record<PurchaseStatus, { label: string; tone: 'success' | 'warning
   PARTIAL: { label: 'Part paid', tone: 'info' },
   UNPAID: { label: 'Unpaid', tone: 'warning' },
   CANCELLED: { label: 'Cancelled', tone: 'neutral' },
+  REPLACED: { label: 'Replaced by an edit', tone: 'neutral' },
 };
 
 export function PurchaseStatusBadge({ status, overdue, className }: { status: PurchaseStatus; overdue?: boolean; className?: string }) {

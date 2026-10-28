@@ -308,6 +308,7 @@ const purchases: ReportImpl = ({ db, params: p, today, limit }) => {
               b.outstanding, b.cancelled, COALESCE((SELECT SUM(d.total) FROM debit_notes d WHERE d.purchase_id = p.id), 0) AS returned
        FROM purchases p JOIN suppliers s ON s.id = p.supplier_id JOIN v_purchase_balances b ON b.purchase_id = p.id
        WHERE p.supplier_invoice_date BETWEEN ? AND ? AND (? IS NULL OR p.supplier_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM purchase_revisions r WHERE r.purchase_id = p.id)
        ORDER BY p.supplier_invoice_date, p.id LIMIT ?`,
     )
     .all(p.from, p.to, p.supplierId ?? null, p.supplierId ?? null, limit + 1) as {

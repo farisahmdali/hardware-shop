@@ -26,6 +26,7 @@ const CHECKS: Record<string, string> = {
   'rental-assets': 'No rental unit is double-booked, and unit status matches the rentals',
   'deposit-ledger': 'Deposits held match the deposit account',
   'purchase-totals': 'Purchase totals match their lines',
+  'purchase-revisions': 'Every edited purchase keeps its earlier version, reversed',
   'supplier-allocations': 'No supplier payment is used for more than its amount',
   'supplier-balances': 'Supplier balances match their bills, payments and returns',
   'input-gst': 'Input GST matches the purchase bills and returns',
