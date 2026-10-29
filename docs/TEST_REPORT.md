@@ -69,6 +69,7 @@ The scenarios listed in section 22 of the specification, with the tests that cov
 | Process supplier returns | I `purchases`: credits the supplier, reverses input GST, removes stock at average cost |
 | Verify supplier outstanding balances | I `purchases`, I `reports`: supplier balances match payables |
 | Edit a purchase, keeping its history | I `purchaseEdit`: a corrected version is saved and the earlier one kept; stock, input GST, accounts and what is owed follow the correction, dated on the bill's day; payments carry over; only changed products move stock; after sales, stock is corrected at average cost and an edit bringing in less than was sold is refused; repeated edits number -R2, -R3 and only the newest can be changed; refusals for returned, cancelled or unchanged bills and duplicate bill numbers; each edit recorded with every change, the user and the reason · I `randomized`: edits mixed into the random sequences · E `purchaseEdit` |
+| Scan a supplier's bill into a purchase (optional AI, 1.2) | U `billRead`: amounts, dates, GST slabs, GSTINs, discounts and malformed answers · U `itemMatch`: abbreviations, sizes and units, a different size or number never matched, unit mapping, the network allowance · I `aiScan` (OpenRouter replaced by a stand-in): the key stored encrypted and never in the database, history or settings; connection test; refusals when off, without key or model, and over the monthly limit; only the bill is sent; supplier by GSTIN or name; matching and remembered names; a bill already recorded; every failure explained and recorded; PDF and models without structured output; data check clean after saving · E `billScan`: settings, scan, new supplier from the bill, a line pointed to an existing product, a line left out, a new product added only after its selling price is typed, stock brought in, the next bill matched by itself, history, item names, and the network limits |
 
 ### History
 
@@ -90,6 +91,7 @@ The scenarios listed in section 22 of the specification, with the tests that cov
 | Install and launch without internet access | Installer test: the installed app refuses network requests, and none of its processes holds a remote network connection (checked with Windows' own connection list) |
 | Create and edit products, complete a sale, issue and return rentals, invoices and reports, back up and restore offline | Every end-to-end test runs with all network requests blocked by the application; `foundation` checks that a request is refused |
 | Restart and verify persistence | E `foundation` · installer test (upgrade keeps data) |
+| The optional AI assistant (1.2) reaches nothing but OpenRouter | U `itemMatch`: only `https://openrouter.ai/api/v1/…` is allowed · E `billScan`: with the assistant set up, the windows' requests are still refused and the assistant's own session refuses any other address · installer test: with the assistant off (the default), no process holds a remote connection |
 
 ### Recovery
 
@@ -209,3 +211,17 @@ The history text search reads every history entry, so its limit is 1.5 s rather 
 The release installer is `Hardware Shop Manager Setup 1.1.0.exe`, 123,855,379 bytes, SHA-256 `C25777636A343FC834C537D55A0E01F772D3E341BD54FBEE9263564FF1D044F5`. The package check passed. The built application could not be started from the build folder for a last look, because a copy of the application was open on the same computer (only one can run at a time).
 
 `HWS_INSTALLER_DIR=<folder> npm run test:install` builds the test installers into another folder, for when an editor keeps the previous build's files open.
+
+## Version 1.2.0: scanning supplier bills with AI (29 October 2026)
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | No errors |
+| `npm test` | 279 passed (1 skipped, as above), including 33 new tests: 21 unit tests (`billRead`, `itemMatch`) and 12 integration tests (`aiScan`) |
+| `npm run test:e2e` | 12 of 12 passed, including the new `billScan` test against a local stand-in for OpenRouter |
+| `npm run test:install` | Passed (installers 1.2.0 and 1.2.1, package check passed) |
+| Upgrade of a real shop's data | A copy of the development computer's shop data upgraded to version 10 (migration 010): every row kept, data check clean |
+| `npm run perf` | Not run again: scanning adds no work to the operations measured; matching one bill reads at most 40 candidate products per line through the product search index |
+| A real bill with a real OpenRouter key and model | **Not tested.** Needs the owner's own key. The requests follow OpenRouter's documented API (chat completions with an image or a PDF file part, structured output, the models and key endpoints); how well a given model reads a given bill can only be seen with real bills |
+
+The release installer is `Hardware Shop Manager Setup 1.2.0.exe`, 123,873,431 bytes, SHA-256 `7AECAEC6E78106C2903D71B0AEAA244329217D9FA52401141DDE7A0EF5B8ECB5`. The package check passed.

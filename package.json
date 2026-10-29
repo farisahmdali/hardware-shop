@@ -1,7 +1,7 @@
 {
   "name": "hardware-shop",
   "productName": "Hardware Shop Manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Offline sales, inventory, rental and accounts management for a hardware shop",
   "private": true,
   "main": "out/main/index.js",

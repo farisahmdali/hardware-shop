@@ -13,6 +13,12 @@ const ACTION_LABELS: Record<string, string> = {
   BACKUP_PRUNED: 'Old backups removed',
   BACKUP_RESTORED: 'Data restored from a backup',
   RESTORE_FAILED: 'Restore failed',
+  AI_SCAN: "Supplier's bill read by AI",
+  AI_SCAN_FAILED: "Reading a supplier's bill failed",
+  AI_KEY_SET: 'OpenRouter API key saved',
+  AI_KEY_REPLACED: 'OpenRouter API key replaced',
+  AI_KEY_REMOVED: 'OpenRouter API key removed',
+  ITEM_NAME_FORGOTTEN: "Supplier's item name forgotten",
 };
 
 export function actionLabel(action: string): string {
@@ -151,6 +157,20 @@ const FIELD_LABELS: Record<string, string> = {
   filters: 'Filters',
   report: 'Report',
   period: 'Period',
+  fileSizeKb: 'File size (KB)',
+  model: 'AI model',
+  seconds: 'Time taken (seconds)',
+  itemsRead: 'Items read',
+  itemsMatched: 'Items matched to products',
+  aiUsage: 'AI tokens used',
+  costUsd: 'OpenRouter cost (US$)',
+  apiKey: 'API key',
+  filledFromScannedBill: 'Filled from scanned bill',
+  itemNamesRemembered: "Supplier's item names remembered",
+  itemName: "Supplier's item name",
+  product: 'Product',
+  enabled: 'Switched on',
+  monthlyScanLimit: 'Bill scans allowed per month',
 };
 
 export function fieldLabel(key: string): string {

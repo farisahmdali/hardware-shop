@@ -8,7 +8,7 @@ export function newDataDir(): string {
 }
 
 /** Launches the built application (out/) against an isolated data folder. */
-export async function launch(dataDir: string): Promise<{ app: ElectronApplication; page: Page }> {
+export async function launch(dataDir: string, extraEnv: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
   // Editors such as VS Code set this for their own child processes; it would start Electron as plain Node.
@@ -16,6 +16,7 @@ export async function launch(dataDir: string): Promise<{ app: ElectronApplicatio
   delete env.ELECTRON_RENDERER_URL;
   env.HWS_DATA_DIR = dataDir;
   env.NODE_ENV = 'production';
+  Object.assign(env, extraEnv);
 
   const app = await electron.launch({ args: [join(__dirname, '../../out/main/index.js')], env });
   const page = await app.firstWindow();

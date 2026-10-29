@@ -2,7 +2,7 @@
 
 This guide is for the shop owner and staff. It explains how to do everyday work in the application. Words in **bold** are buttons, tabs or menu items exactly as they appear on screen.
 
-The application works entirely on the shop computer. It never needs the internet.
+The application works entirely on the shop computer and never needs the internet. The only exception is the optional AI assistant for reading supplier bills (section 9), which is off unless the owner switches it on.
 
 ## Contents
 
@@ -155,6 +155,30 @@ A product that is no longer sold is made inactive, not deleted, so old bills sti
 - **Return goods** on a purchase: sends items back to the supplier and creates a debit note.
 - **Edit** a purchase to correct anything on it: the supplier, their bill number or date, items, quantities, rates, GST, discounts, freight or notes. Give the reason for the change. The corrected bill is saved as a new version (for example PUR/2026-27/00012-R2); the bill as it was is kept, marked *replaced*, and the page shows every version. **History** shows exactly what changed, who changed it and why. Stock, what you owe the supplier and GST are corrected automatically, and payments already made count towards the corrected bill. A bill cannot be edited once goods have been returned against it, and the corrected bill cannot bring in fewer goods than have already been sold.
 - **Cancel purchase** if a bill was entered by mistake. This is only possible while the goods it brought in are still in stock and none have been returned to the supplier.
+
+### Scanning a supplier's bill with AI (optional)
+
+Instead of typing a bill, you can let an AI model read a photo or PDF of it. You check what it read and save it yourself; the AI never saves anything.
+
+**Setting it up (owner, once):**
+
+1. Create an account at openrouter.ai, add a little credit, and create an API key (**Keys**). Reading one bill usually costs well under a rupee.
+2. In **Backup & Settings → AI assistant**, paste the key and click **Save key**. It is kept encrypted on this computer for your Windows user. It is not part of backups, so after setting up a new computer, enter it again.
+3. Enter the **AI model**: the model id from openrouter.ai/models. It must be able to read images (for example a Gemini, GPT or Claude model). Switch on **Scan supplier bills with AI**, set how many bills may be scanned per month, and click **Save AI settings**.
+4. Click **Test connection**. It checks the key and tells you whether the model can read bills.
+
+Only the bill file you choose is sent, to OpenRouter and the company running the model. Your products, customers, sales and accounts never leave the computer. Every bill read (and every failed attempt) is in **History** with the file name, the model and what it cost, but never the key or the bill itself.
+
+**Scanning a bill:**
+
+1. **New purchase → Scan supplier's bill…** and choose the photo (JPG, PNG, WEBP) or PDF. A clear, straight photo of the whole bill works best. Reading takes a few seconds to a minute; the computer needs the internet only for this.
+2. The form is filled in: supplier, their bill number and date, whether rates include GST, each item's quantity, rate, discount and GST, freight and round-off. The bill is shown on the right with its printed total next to the purchase total, and a list of **things to check**. A supplier not yet in the shop can be added from the bill's details with **Add as a new supplier…**.
+3. Items the app recognised are in the item list. **Remembered** means the same item was confirmed on an earlier bill from this supplier; **Matched, please check** means the app found it by name, size and HSN code. If a match is wrong, click **Not this product**. A product of a different size is never matched (a ½" pipe is never taken for a 1" pipe).
+4. Items not found are listed under **New items on this bill**, and the purchase cannot be saved until each one is decided:
+   - **Add as a new product:** the name, unit, HSN code and GST rate come from the bill (change them if needed); type the **selling price**, which the bill cannot tell. **Add all new items** becomes available once every new item has a selling price. New products start with no stock: saving the purchase brings it in.
+   - **Point to existing product…** when you already have it under another name: pick one of the similar products shown or search.
+   - **Leave out** a line that is not an item (for example a charge already paid). It is listed under the bill so the difference in the total is explained; **Put back** undoes it.
+5. Compare with the bill and **Save purchase**. The supplier's names for the items are remembered, so their next bill is matched by itself. **Suppliers → (supplier) → Item names** lists them; **Forget** one that was linked to the wrong product.
 
 ## 10. Expenses and the cash drawer
 

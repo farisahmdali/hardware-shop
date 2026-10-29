@@ -7,6 +7,7 @@ import { postLedger, type LedgerLine } from './ledger';
 import { recordMovement } from './stock';
 import { getAllSettings } from './settings';
 import { supplierCreditDays } from './suppliers';
+import { rememberItemNames } from './ai/supplierItemNames';
 import { AppError, ErrorCodes } from '@shared/errors';
 import { proportionalShare, type Discount } from '@shared/billing';
 import { claimsInputGst, computePurchase } from '@shared/purchasing';
@@ -20,7 +21,7 @@ export interface PurchaseInput {
   supplierInvoiceNo: string;
   supplierInvoiceDate: string;
   pricesIncludeTax: boolean;
-  lines: { productId: number; qty: number; unitCost: number; gstRateBp: number; discount: Discount | null }[];
+  lines: { productId: number; qty: number; unitCost: number; gstRateBp: number; discount: Discount | null; scannedText?: string }[];
   billDiscount: Discount | null;
   additionalCosts: number;
   additionalCostsNote: string;
@@ -29,6 +30,8 @@ export interface PurchaseInput {
   payments: { methodId: number; amount: number; reference: string }[];
   updatePurchasePrices: boolean;
   expectedGrandTotal: number;
+  /** The bill file the form was filled from by the AI assistant. */
+  scannedFrom?: string;
 }
 
 interface SupplierForPurchase {
@@ -72,7 +75,7 @@ export function createPurchase(env: AppEnv, actor: Actor, input: PurchaseInput) 
 }
 
 /** A purchase bill as entered, without the payments made at entry. */
-export type PurchaseBillInput = Omit<PurchaseInput, 'requestId' | 'payments'>;
+export type PurchaseBillInput = Omit<PurchaseInput, 'requestId' | 'payments' | 'scannedFrom'>;
 
 interface PreparedPurchase {
   input: PurchaseBillInput;
@@ -322,12 +325,14 @@ function createPurchaseTx(tx: Tx, input: PurchaseInput) {
   if (input.updatePurchasePrices) updatePurchasePricesFrom(tx, prep, purchaseId, purchaseNo);
 
   const outstanding = calc.grandTotal - paid - fromAdvance;
+  const remembered = rememberItemNames(tx, supplier.id, input.lines);
   tx.audit({
     module: 'purchases',
     entityType: 'purchase',
     entityId: purchaseId,
     action: 'CREATE',
     after: {
+      ...(input.scannedFrom ? { filledFromScannedBill: input.scannedFrom, itemNamesRemembered: remembered } : {}),
       purchaseNo,
       supplier: supplier.name,
       supplierInvoiceNo: input.supplierInvoiceNo,

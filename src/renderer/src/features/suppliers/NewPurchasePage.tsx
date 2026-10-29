@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Trash2, Truck } from 'lucide-react';
-import type { ProductListRow, PurchaseDetail, SupplierDetail, SupplierRow } from '@shared/contracts';
+import { ArrowLeft, ScanText, Trash2, Truck } from 'lucide-react';
+import type { ProductListRow, PurchaseDetail, ScanDraft, ScanLine, SupplierDetail, SupplierRow } from '@shared/contracts';
 import type { Discount } from '@shared/billing';
 import { formatMoney, mulDivRound, roundToRupee } from '@shared/money';
 import { formatQty } from '@shared/qty';
@@ -14,13 +14,16 @@ import { useCan } from '../../lib/session';
 import { useToast } from '../../lib/toast';
 import { Button } from '../../components/ui/button';
 import { Checkbox, Field, Input, Textarea } from '../../components/ui/form';
-import { Card, CardHeader, ErrorBanner, PageHeader } from '../../components/ui/layout';
+import { Badge, Card, CardHeader, ErrorBanner, PageHeader } from '../../components/ui/layout';
+import { ConfirmDialog } from '../../components/ui/dialog';
 import { MoneyInput, QtyInput, newRequestId } from '../../components/ui/numberInputs';
 import { cn } from '../../lib/cn';
 import { ProductSearch, type ProductSearchHandle } from '../sales/ProductSearch';
 import { PaymentLines, toPayments, type PaymentEntry } from '../rentals/shared';
 import { SupplierPicker } from './SupplierPicker';
 import { SUPPLIER_INVALIDATE } from './shared';
+import { SupplierFormDialog } from './SupplierFormDialog';
+import { HOW_LABEL, NewItemsCard, ScannedBillCard, pendingFrom, type PendingItem } from './ScannedBill';
 
 interface Line {
   key: string;
@@ -30,6 +33,8 @@ interface Line {
   gstRateBp: number;
   /** Discount in basis points of the line amount. */
   discountBp: number;
+  /** The line of a scanned bill this came from. */
+  scan?: ScanLine;
 }
 
 type SupplierInfo = Pick<SupplierRow, 'id' | 'name' | 'gstin' | 'stateCode'>;
@@ -105,6 +110,15 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
     const amount = bill0 ? bill0.lines.reduce((a, l) => a + l.billDiscount, 0) : 0;
     return amount > 0 ? { type: 'AMOUNT', value: amount } : null;
   });
+  const ai = useCommandQuery('ai.status', undefined, { enabled: !existing });
+  const catalog = useCommandQuery('catalog.get');
+  const scanMutation = useCommandMutation('ai.scanBill', { invalidate: ['ai.'] });
+  const [scan, setScan] = useState<ScanDraft | null>(null);
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  const [skipped, setSkipped] = useState<ScanLine[]>([]);
+  const [confirmScan, setConfirmScan] = useState(false);
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const create = useCommandMutation('purchases.create', { invalidate: SUPPLIER_INVALIDATE });
   const edit = useCommandMutation('purchases.edit', { invalidate: SUPPLIER_INVALIDATE });
 
@@ -155,8 +169,64 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
   };
   const update = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
+  // ---- Scanning a supplier's bill with the AI assistant ----
+  const lineFromScan = (l: ScanLine, product: ProductListRow, gstin: string | null | undefined): Line => ({
+    key: crypto.randomUUID(),
+    product,
+    qty: l.qty || null,
+    unitCost: l.rate,
+    gstRateBp: gstin ? l.gstRateBp : 0,
+    discountBp: l.discountBp,
+    scan: l,
+  });
+  const applyScan = (d: ScanDraft) => {
+    const found = d.supplier.match;
+    setSupplier(found);
+    setBillNo(d.supplierInvoiceNo);
+    if (d.supplierInvoiceDate) setBillDate(d.supplierInvoiceDate);
+    setIncludesTax(d.pricesIncludeTax);
+    setAdditional(d.additionalCosts || null);
+    setAdditionalNote(d.additionalCostsNote);
+    setRoundOff(d.roundOff);
+    setLines(d.lines.filter((l) => l.match).map((l) => lineFromScan(l, l.match!.product, found?.gstin)));
+    setPending(catalog.data ? d.lines.filter((l) => !l.match).map((l) => pendingFrom(l, catalog.data!)) : []);
+    setSkipped([]);
+    setScan(d);
+    setError(null);
+    setRequestId(newRequestId());
+  };
+  const runScan = async () => {
+    setConfirmScan(false);
+    setScanError(null);
+    try {
+      const d = await scanMutation.mutateAsync({});
+      if (d) applyScan(d);
+    } catch (e) {
+      setScanError(errorMessage(e));
+    }
+  };
+  const byBillOrder = (a: Line, b: Line) => (a.scan?.index ?? 1e9) - (b.scan?.index ?? 1e9);
+  const resolvePending = (item: PendingItem, product: ProductListRow) => {
+    setPending((ps) => ps.filter((p) => p.key !== item.key));
+    setLines((ls) => [...ls, lineFromScan(item.scan, product, supplier?.gstin)].sort(byBillOrder));
+  };
+  const skipPending = (item: PendingItem) => {
+    setPending((ps) => ps.filter((p) => p.key !== item.key));
+    setSkipped((ss) => [...ss, item.scan]);
+  };
+  /** A scanned line linked to the wrong product goes back to the new-items list. */
+  const unlink = (l: Line) => {
+    setLines((ls) => ls.filter((x) => x.key !== l.key));
+    if (l.scan && catalog.data) setPending((ps) => [...ps, pendingFrom({ ...l.scan!, qty: l.qty ?? l.scan!.qty, rate: l.unitCost ?? l.scan!.rate }, catalog.data!)]);
+  };
+  const removeLine = (l: Line) => {
+    setLines((ls) => ls.filter((x) => x.key !== l.key));
+    if (l.scan) setSkipped((ss) => [...ss, l.scan!]);
+  };
+
   const problems: string[] = [];
   if (!supplier) problems.push('Choose the supplier');
+  if (pending.length > 0) problems.push(`Decide what to do with the ${pending.length} new item${pending.length > 1 ? 's' : ''} from the bill`);
   if (lines.length === 0) problems.push('Add the items on the bill');
   if (lines.length !== ready.length) problems.push('Every item needs a quantity and a rate');
   if (Math.abs(roundOff) > maxRoundOff) problems.push(`Round-off can be at most ${formatMoney(maxRoundOff)}`);
@@ -177,6 +247,7 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
         unitCost: l.unitCost!,
         gstRateBp: registered ? l.gstRateBp : 0,
         discount: l.discountBp ? ({ type: 'PERCENT', valueBp: l.discountBp } as const) : null,
+        scannedText: l.scan?.text,
       })),
       billDiscount,
       additionalCosts: additional ?? 0,
@@ -193,7 +264,7 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
         navigate(`/suppliers/purchases/${r.purchaseId}`, { replace: true });
         return;
       }
-      const r = await create.mutateAsync({ ...fields, requestId, payments: toPayments(payments) });
+      const r = await create.mutateAsync({ ...fields, requestId, payments: toPayments(payments), scannedFrom: scan?.fileName });
       toast.success(`Purchase ${r.purchaseNo} saved`, r.outstanding > 0 ? `${formatMoney(r.outstanding)} to pay ${supplier.name}` : 'Fully paid');
       navigate(`/suppliers/purchases/${r.purchaseId}`, { replace: true });
     } catch (e) {
@@ -220,7 +291,27 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
           description="Correct anything on the bill. Saving records the corrected bill as a new version and keeps this one, unchanged, in the history."
         />
       ) : (
-        <PageHeader title="New purchase" description="Copy the supplier's bill. Stock is added at the bill's cost when you save." />
+        <PageHeader
+          title="New purchase"
+          description="Copy the supplier's bill. Stock is added at the bill's cost when you save."
+          actions={
+            ai.data?.ready && can('purchases.manage') ? (
+              <Button
+                variant="outline"
+                icon={<ScanText className="size-4" />}
+                busy={scanMutation.isPending}
+                onClick={() => (lines.length || pending.length ? setConfirmScan(true) : void runScan())}
+              >
+                {scanMutation.isPending ? 'Reading the bill…' : "Scan supplier's bill…"}
+              </Button>
+            ) : undefined
+          }
+        />
+      )}
+      {scanError && (
+        <div className="mb-5">
+          <ErrorBanner title="The bill could not be read" message={scanError} />
+        </div>
       )}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_400px]">
         <div className="flex min-w-0 flex-col gap-5">
@@ -235,6 +326,17 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
                       {supplier.gstin ? `GSTIN ${supplier.gstin}` : 'Not GST registered'}
                       {supplier.stateCode && ` · ${stateName(supplier.stateCode)}`}
                     </p>
+                  </div>
+                ) : scan && (scan.supplier.name || scan.supplier.gstin) ? (
+                  <div className="min-w-0">
+                    <p className="truncate text-ink-2">
+                      On the bill: <span className="font-medium text-ink">{scan.supplier.name || scan.supplier.gstin}</span>
+                    </p>
+                    {can('suppliers.manage') && (
+                      <button type="button" className="text-[13px] font-medium text-brand hover:underline" onClick={() => setAddingSupplier(true)}>
+                        Add as a new supplier…
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="text-ink-3">No supplier chosen</p>
@@ -252,6 +354,20 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
               </div>
             </div>
           </Card>
+
+          {pending.length > 0 && catalog.data && s && (
+            <NewItemsCard
+              items={pending}
+              catalog={catalog.data}
+              supplierId={supplier?.id ?? null}
+              billLabel={`${supplier?.name ?? scan?.supplier.name ?? 'the supplier'}'s bill${billNo ? ` ${billNo}` : ''}`}
+              pricesIncludeTax={s.tax.pricesIncludeTax}
+              canAddProducts={can('products.manage')}
+              onChange={setPending}
+              onResolved={resolvePending}
+              onSkip={skipPending}
+            />
+          )}
 
           <Card>
             <CardHeader title="Items" description={supplier && !registered ? 'This supplier is not GST registered, so no GST is charged.' : undefined} />
@@ -281,6 +397,17 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
                         <tr key={l.key} className="border-t border-line align-top">
                           <td className="px-4 py-2">
                             <span className="font-medium text-ink">{l.product.name}</span>
+                            {l.scan && (
+                              <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-3">
+                                <span className="truncate">On the bill: {l.scan.text}</span>
+                                {l.scan.match?.product.id === l.product.id ? (
+                                  <Badge tone={l.scan.match.how === 'BEST' ? 'warning' : 'success'}>{HOW_LABEL[l.scan.match.how]}</Badge>
+                                ) : null}
+                                <button type="button" className="font-medium text-brand hover:underline" onClick={() => unlink(l)}>
+                                  Not this product
+                                </button>
+                              </span>
+                            )}
                             <span className="block text-[12px] text-ink-3">
                               <span className="font-mono">{l.product.sku}</span> · {formatQty(l.product.qty)} {l.product.unitCode} in stock
                               {landed !== null && l.qty ? ` · lands at ${formatMoney(Math.round((landed * 1000) / l.qty))}/${l.product.unitCode}` : ''}
@@ -335,7 +462,7 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
                               type="button"
                               aria-label={`Remove ${l.product.name}`}
                               className="rounded p-1.5 text-ink-3 hover:bg-surface-2 hover:text-danger"
-                              onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                              onClick={() => removeLine(l)}
                             >
                               <Trash2 className="size-4" />
                             </button>
@@ -364,6 +491,18 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
         </div>
 
         <div className="flex flex-col gap-5">
+          {scan && (
+            <ScannedBillCard
+              draft={scan}
+              calculatedTotal={calc.grandTotal}
+              pendingCount={pending.length}
+              skipped={skipped}
+              onPutBack={(l) => {
+                setSkipped((ss) => ss.filter((x) => x !== l));
+                if (catalog.data) setPending((ps) => [...ps, pendingFrom(l, catalog.data!)]);
+              }}
+            />
+          )}
           <Card>
             <CardHeader title="Bill total" />
             <div className="flex flex-col gap-1.5 p-5">
@@ -434,6 +573,27 @@ export function PurchaseForm({ existing }: { existing?: ExistingBill }) {
           </Card>
         </div>
       </div>
+      {confirmScan && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => !o && setConfirmScan(false)}
+          title="Replace what is entered?"
+          description="Scanning a bill fills the form from the bill, replacing the supplier and items entered so far."
+          confirmLabel="Scan and replace"
+          onConfirm={runScan}
+        />
+      )}
+      {addingSupplier && scan && (
+        <SupplierFormDialog
+          supplier={null}
+          initial={{ name: scan.supplier.name, phone: scan.supplier.phone, address: scan.supplier.address, gstin: scan.supplier.gstin, stateCode: scan.supplier.stateCode }}
+          onClose={() => setAddingSupplier(false)}
+          onSaved={(x) => {
+            setAddingSupplier(false);
+            chooseSupplier(x);
+          }}
+        />
+      )}
       {picking && <SupplierPicker onClose={() => setPicking(false)} onPick={(x: SupplierRow | SupplierDetail) => chooseSupplier(x)} />}
     </>
   );

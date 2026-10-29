@@ -107,6 +107,15 @@ export const purchaseSettingsSchema = z.object({
   maxRoundOff: z.number().int().min(0).max(10_000).default(1_000),
 });
 
+export const aiSettingsSchema = z.object({
+  /** Reading supplier bills with an AI model through OpenRouter. The only feature that uses the internet. */
+  enabled: z.boolean().default(false),
+  /** OpenRouter model id, e.g. google/gemini-2.5-flash. It must read images. */
+  model: z.string().trim().max(120).default(''),
+  /** Bills that may be read in a calendar month; protects against unexpected charges. */
+  monthlyScanLimit: z.number().int().min(1).max(10_000).default(200),
+});
+
 export const settingsSchemas = {
   shop: shopProfileSchema,
   tax: taxSettingsSchema,
@@ -117,6 +126,7 @@ export const settingsSchemas = {
   printing: printingSettingsSchema,
   rental: rentalSettingsSchema,
   purchases: purchaseSettingsSchema,
+  ai: aiSettingsSchema,
 } as const;
 
 export type SettingsSection = keyof typeof settingsSchemas;
@@ -136,5 +146,6 @@ export function defaultSettings(): Omit<AllSettings, 'shop'> {
     printing: printingSettingsSchema.parse({}),
     rental: rentalSettingsSchema.parse({}),
     purchases: purchaseSettingsSchema.parse({}),
+    ai: aiSettingsSchema.parse({}),
   };
 }

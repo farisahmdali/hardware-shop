@@ -21,6 +21,7 @@ import { PurchasesTable } from './PurchasesTable';
 import { PayablesTable } from './PayablesTable';
 import { SupplierPaymentsTable } from './SupplierPaymentsTable';
 import { SUPPLIER_INVALIDATE } from './shared';
+import { SupplierItemNames } from './SupplierItemNames';
 
 function Tile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'warning' | 'danger' | 'success' }) {
   return (
@@ -143,6 +144,7 @@ export function SupplierDetailPage() {
           {canView && <TabsTrigger value="open">Bills to pay</TabsTrigger>}
           {canView && <TabsTrigger value="purchases">Purchases</TabsTrigger>}
           {canView && <TabsTrigger value="payments">Payments</TabsTrigger>}
+          {canView && <TabsTrigger value="itemNames">Item names</TabsTrigger>}
           <TabsTrigger value="details">Details</TabsTrigger>
           {can('audit.view') && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
@@ -167,6 +169,9 @@ export function SupplierDetailPage() {
               <Card>
                 <SupplierPaymentsTable supplierId={s.id} />
               </Card>
+            </TabsContent>
+            <TabsContent value="itemNames">
+              <SupplierItemNames supplierId={s.id} supplierName={s.name} />
             </TabsContent>
           </>
         )}

@@ -14,6 +14,7 @@ import { purchaseHandlers } from '@main/ipc/purchaseHandlers';
 import { expenseHandlers } from '@main/ipc/expenseHandlers';
 import { reportHandlers } from '@main/ipc/reportHandlers';
 import { historyAsReport, historyHandlers } from '@main/ipc/historyHandlers';
+import { aiHandlers } from '@main/ipc/aiHandlers';
 import { inProcessRunner } from '@main/reports/runner';
 import { auditFacets, auditForExport, listAudit } from '@main/services/audit';
 import { buildSession, completeSetup, createUser, listRoles } from '@main/services/auth';
@@ -342,6 +343,7 @@ describe('permissions', () => {
     ...expenseHandlers(),
     ...historyHandlers(ui, printer),
     ...reportHandlers(ui, printer, inProcessRunner(() => env.db)),
+    ...aiHandlers(ui),
   });
 
   const PUBLIC = ['app.status', 'setup.complete', 'setup.restoreChoose', 'setup.restore', 'auth.session', 'auth.loginOptions', 'auth.login'];
@@ -359,6 +361,7 @@ describe('permissions', () => {
     'suppliers.list', 'suppliers.get', 'suppliers.ledger', 'purchases.list', 'purchases.get', 'supplierPayments.list',
     'payables.list', 'payables.ageing', 'payables.summary', 'expenses.summary',
     'reports.run', 'reports.export', 'reports.print', 'dashboard.period', 'dashboard.recent',
+    'ai.status', 'supplierItemNames.list',
   ];
 
   let sessions: Map<number, number>;

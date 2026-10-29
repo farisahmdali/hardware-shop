@@ -13,11 +13,14 @@ import { MoneyInput, newRequestId } from '../../components/ui/numberInputs';
 export function SupplierFormDialog({
   supplier,
   initialName = '',
+  initial,
   onClose,
   onSaved,
 }: {
   supplier: SupplierDetail | null;
   initialName?: string;
+  /** Details for a new supplier, e.g. as read from their bill. */
+  initial?: { name?: string; phone?: string; address?: string; gstin?: string; stateCode?: string };
   onClose(): void;
   onSaved(s: SupplierDetail): void;
 }) {
@@ -25,12 +28,12 @@ export function SupplierFormDialog({
   const toast = useToast();
   const settings = useCommandQuery('settings.get');
   const [f, setF] = useState({
-    name: supplier?.name ?? initialName,
-    phone: supplier?.phone ?? '',
-    address: supplier?.address ?? '',
+    name: supplier?.name ?? (initial?.name || initialName),
+    phone: supplier?.phone ?? initial?.phone ?? '',
+    address: supplier?.address ?? initial?.address ?? '',
     businessName: supplier?.businessName ?? '',
-    gstin: supplier?.gstin ?? '',
-    stateCode: supplier?.stateCode ?? '',
+    gstin: supplier?.gstin ?? initial?.gstin ?? '',
+    stateCode: supplier?.stateCode ?? initial?.stateCode ?? '',
     creditDays: supplier?.creditDays ?? null,
     notes: supplier?.notes ?? '',
   });

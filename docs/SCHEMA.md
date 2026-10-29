@@ -145,6 +145,10 @@ Index only, no data changes: `idx_ledger_party_account` on ledger entries by par
 
 `purchase_revisions` (append-only) links each replaced version of an edited purchase (`purchase_id`) to the version that replaced it (`revised_purchase_id`), with the first version (`original_purchase_id`), the new version's number (`revision`, from 2), the reason, the user and the time. Each version is an ordinary `purchases` row; the replaced one also has a `purchase_cancellations` row from the same edit, so every total, balance and report counts only the newest version. The reversal of a replaced version is posted with ledger `ref_type` `PURCHASE_REVISED`.
 
+## Migration 010: supplier item names
+
+`supplier_item_names` remembers what each supplier calls the shop's products, for matching scanned bills (version 1.2): `supplier_id`, `item_key` (the normalised item text: lowercase, abbreviations expanded, sizes converted, words sorted; see `src/main/services/ai/itemMatch.ts`), `item_text` as last printed, `product_id`, `uses`, and when it was first and last used, unique per supplier and key. It is a lookup aid, not a business record: no purchase refers to it, a name linked to another product is updated in place, and a link can be deleted ("forgotten", recorded in the audit log). Indexed by key (for names remembered from any supplier) and by product.
+
 ## Later migrations
 
 Each later phase that needs new tables adds its own migration. Existing data is never dropped or rewritten destructively.

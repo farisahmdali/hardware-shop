@@ -2,7 +2,7 @@
 
 Offline desktop software for a hardware and tools shop: sales and GST billing, stock, tool rental, customers, suppliers, expenses, reports, a permanent history of every change, and local backups.
 
-Everything runs on the shop's Windows computer. It needs no internet connection, account or server.
+Everything runs on the shop's Windows computer. It needs no internet connection, account or server. The one optional exception, off unless the owner switches it on, is the AI assistant that reads a photo of a supplier's bill through the owner's own OpenRouter account (version 1.2); see the user guide, section 9.
 
 ## Status
 
@@ -18,6 +18,8 @@ The application is built in phases. Each phase is tested before the next one sta
 | 6 | About 45 reports (sales, stock, rentals, money and profit, GST, customers and suppliers) with filters, sorting and Excel/CSV/PDF export and printing, run in a background worker; dashboard with a chosen period, separately labelled sales, collections, deposits, expenses and estimated profit, a daily chart, recent transactions and significant changes | **Done** |
 | 7 | History screen with search by product, customer, supplier, bill or receipt, filters by date, module, action and user, before/after changes, links between records and transactions, CSV/PDF export; history on each record; every refused action recorded; automatic backups with retention; restore with checks, a copy of the current data first, and automatic undo of an unfinished restore; history and accounting completeness checks | **Done** |
 | 8 | Recovery tests (the process killed in the middle of sales, payments, purchases and backups; upgrades from every earlier version and over a populated database; long randomized operation sequences); performance run on a two-year, 100,000-bill shop and the fixes it led to (a memory leak, data and backup checks moved off the main thread, fast customer screens, an upgrade notice); setting up a new computer from a backup; usability check at 1366 × 768; Windows installer with an app icon; install/upgrade/uninstall test with a network check; user, installation, backup and upgrade guides and a test report | **Done** |
+| 1.1 | Editing a purchase: the corrected bill is saved as a new version and the old one is kept, with a full before/after history | **Done** |
+| 1.2 | Optional AI assistant: scan a supplier's bill (photo or PDF) into a draft purchase through OpenRouter, with the owner's own key and model; offline matching to the shop's suppliers and products; new items added from the bill with their selling price; the supplier's item names remembered for the next bill | **Done** |
 
 ## Development
 

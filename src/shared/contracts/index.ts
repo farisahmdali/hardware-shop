@@ -7,6 +7,7 @@ import { rentalCommands } from './rentals';
 import { purchaseCommands } from './purchases';
 import { expenseCommands } from './expenses';
 import { reportCommands } from './reports';
+import { aiCommands } from './ai';
 
 export const contract = {
   ...systemCommands,
@@ -16,6 +17,7 @@ export const contract = {
   ...purchaseCommands,
   ...expenseCommands,
   ...reportCommands,
+  ...aiCommands,
 };
 
 export type Contract = typeof contract;
@@ -33,3 +35,4 @@ export * from './rentals';
 export * from './purchases';
 export * from './expenses';
 export * from './reports';
+export * from './ai';

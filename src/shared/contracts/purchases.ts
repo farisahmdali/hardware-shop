@@ -243,6 +243,8 @@ export const purchaseLineInput = z.object({
   unitCost: paise,
   gstRateBp: z.number().int().min(0).max(10_000),
   discount: discountSchema.default(null),
+  /** The item as printed on a scanned bill; remembered for this supplier when the bill is saved. */
+  scannedText: z.string().trim().max(200).optional(),
 });
 
 
@@ -294,6 +296,8 @@ export const purchaseCommands = {
       requestId,
       /** Paid to the supplier now, at the time of entry. */
       payments: z.array(paymentLine).max(6).default([]),
+      /** The bill file the purchase was filled from by scanning, for the history. */
+      scannedFrom: z.string().trim().max(200).optional(),
     }),
   ),
   'purchases.list': command<Paged<PurchaseRow>>()(

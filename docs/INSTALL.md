@@ -8,7 +8,7 @@ This guide is for whoever installs the application on the shop computer: the own
 - About 600 MB of free disk space for the application, plus room for the shop data and backups. A busy shop's two years of data is a few hundred MB, and each backup is about the same size.
 - A USB drive for copies of the backups.
 - A printer if you print bills (A4, or an 80 mm / 58 mm receipt printer installed in Windows).
-- No internet connection is needed, during installation or ever.
+- No internet connection is needed, during installation or ever. Only the optional AI assistant for reading supplier bills uses the internet, while a bill is being read, and only if the owner switches it on.
 
 ## Install
 

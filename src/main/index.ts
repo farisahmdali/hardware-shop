@@ -1,9 +1,9 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { resolvePaths } from './app/paths';
 import { createLogger } from './app/logger';
-import { blockNetwork, hardenWebContents } from './app/security';
+import { blockNetwork, createAiSession, hardenWebContents } from './app/security';
 import { createMainWindow, createUpgradeNotice, devServerUrl, rendererUrl } from './app/window';
 import { openDatabase, type Db } from './db/connection';
 import { systemClock } from './db/tx';
@@ -22,6 +22,7 @@ import { purchaseHandlers } from './ipc/purchaseHandlers';
 import { expenseHandlers } from './ipc/expenseHandlers';
 import { reportHandlers } from './ipc/reportHandlers';
 import { historyHandlers } from './ipc/historyHandlers';
+import { aiHandlers } from './ipc/aiHandlers';
 import { workerRunner } from './reports/workerHost';
 import type { ReportRunner } from './reports/runner';
 import { htmlToPdf, printHtml } from './print/printer';
@@ -35,6 +36,18 @@ let mainWindow: BrowserWindow | null = null;
 let db: Db | null = null;
 let reports: ReportRunner | null = null;
 let backups: { stop(): void } | null = null;
+
+/** Phone photos of bills are large; 2400 pixels on the long side is plenty to read them. */
+function shrinkBillPhoto(data: Buffer): { data: Buffer; mime: string } | null {
+  const image = nativeImage.createFromBuffer(data);
+  if (image.isEmpty()) return null; // a format Electron cannot decode (e.g. WEBP): sent as it is
+  const { width, height } = image.getSize();
+  const MAX = 2400;
+  if (Math.max(width, height) <= MAX && data.length <= 1_500_000) return null;
+  const scale = Math.min(1, MAX / Math.max(width, height));
+  const resized = image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'best' });
+  return { data: resized.toJPEG(85), mime: 'image/jpeg' };
+}
 
 function fatal(title: string, message: string, dataDir?: string): never {
   const where = dataDir ? `\n\nData folder: ${dataDir}` : '';
@@ -64,6 +77,9 @@ async function start(): Promise<void> {
   }
   db = database;
 
+  // HWS_AI_BASE_URL: a local stand-in for OpenRouter, for end-to-end tests of unpackaged builds only.
+  const aiTestBase = !app.isPackaged && process.env.HWS_AI_BASE_URL ? process.env.HWS_AI_BASE_URL.replace(/\/$/, '') : null;
+  const aiSession = createAiSession(logger, aiTestBase);
   const env: AppEnv = {
     db: database,
     clock: systemClock,
@@ -71,6 +87,16 @@ async function start(): Promise<void> {
     paths,
     appVersion,
     logger,
+    ai: {
+      cipher: {
+        available: () => safeStorage.isEncryptionAvailable(),
+        encrypt: (text) => safeStorage.encryptString(text),
+        decrypt: (data) => safeStorage.decryptString(data),
+      },
+      fetch: (url, init) => aiSession.fetch(url, init),
+      baseUrl: aiTestBase ?? undefined,
+      shrinkImage: shrinkBillPhoto,
+    },
   };
 
   // Upgrades: take a verified backup before changing the schema of an existing database.
@@ -151,6 +177,7 @@ async function start(): Promise<void> {
       ...expenseHandlers(),
       ...historyHandlers(ui, { toPdf: htmlToPdf, print: printHtml }),
       ...reportHandlers(ui, { toPdf: htmlToPdf, print: printHtml }, background),
+      ...aiHandlers(ui),
     },
     getSession: (senderId) => {
       const userId = sessions.get(senderId);
