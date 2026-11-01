@@ -135,8 +135,9 @@ function Filters({ def, params, set }: { def: ReportDef; params: ReportParams; s
   const rentalProducts = useCommandQuery('rentalProducts.list', { active: 'ALL' }, { enabled: def.params.includes('rentalProduct') });
   const customer = useCommandQuery('customers.get', { id: params.customerId ?? 0 }, { enabled: !!params.customerId });
   const supplier = useCommandQuery('suppliers.get', { id: params.supplierId ?? 0 }, { enabled: !!params.supplierId });
+  const [chosen, setChosen] = useState<string>(def.defaultRange ?? 'month');
   const presets = rangePresets();
-  const preset = params.from && params.to ? matchPreset(params.from, params.to) : 'custom';
+  const preset = params.from && params.to ? matchPreset(params.from, params.to, chosen) : 'custom';
   const has = (k: ReportDef['params'][number]) => def.params.includes(k);
   if (def.params.length === 0) return null;
 
@@ -153,7 +154,10 @@ function Filters({ def, params, set }: { def: ReportDef; params: ReportParams; s
                 value={preset}
                 onChange={(e) => {
                   const p = presets.find((x) => x.key === e.target.value);
-                  if (p) set({ from: p.from, to: p.to });
+                  if (p) {
+                    setChosen(p.key);
+                    set({ from: p.from, to: p.to });
+                  }
                 }}
               >
                 {presets

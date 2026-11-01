@@ -236,3 +236,18 @@ The release installer is `Hardware Shop Manager Setup 1.2.0.exe`, 123,873,431 by
 | A real OpenRouter models list | **Not tested.** Needs the owner's key; the fields read (`id`, `name`, `architecture.input_modalities`, `supported_parameters`, `pricing.prompt`, `pricing.completion`, `context_length`) are those of OpenRouter's documented models API |
 
 The release installer is `Hardware Shop Manager Setup 1.2.1.exe`, 123,874,615 bytes, SHA-256 `43B783A0DE835DD23BFC247402A89CA7AE18100C624C135CEF3AAC2DC9483C28`. The package check passed.
+
+## Version 1.2.2: saving with no network connection (1 November 2026)
+
+Found on a Mac: with Wi-Fi off, nothing could be saved. The screens' data library (TanStack Query) by default holds every request while the window reports itself offline (`navigator.onLine` false), waiting for a connection that this offline app never needs. Windows usually reports itself online while any network adapter is connected, so the earlier tests did not see it. All requests now go straight to the computer's own database whether or not there is a network (`networkMode: 'always'`).
+
+Also fixed: on the 1st of the month, choosing **This month** on the dashboard or in a report showed **Today** (both are the same single day), and the same for **This week** on a Monday; the period chosen is now kept.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | No errors |
+| `npm test` | 282 passed (1 skipped, as above), including the new `ranges` unit test |
+| `npm run test:e2e` | 13 of 13 passed, including the new `offline` test: with the window reporting no network, the first-run setup, adding a product and the product list work. It failed (setup never saved) before the fix |
+| On a Mac | **Not tested here** (a Mac build can only be made on a Mac); the cause is the same on every system |
+
+The release installer is `Hardware Shop Manager Setup 1.2.2.exe`, 123,874,859 bytes, SHA-256 `7129690CC370938FA4BB0C7FD17A70E23B3B20E94895DCD1EEEAC263DB9C2023`. The package check passed.

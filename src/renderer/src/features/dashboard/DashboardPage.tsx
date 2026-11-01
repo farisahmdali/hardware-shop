@@ -96,7 +96,8 @@ export function DashboardPage() {
   const canViewPurchasing = useCanViewPurchasing();
   const today = businessDateOf(new Date());
   const [range, setRange] = useState({ from: today, to: today });
-  const preset = matchPreset(range.from, range.to);
+  const [chosen, setChosen] = useState('today');
+  const preset = matchPreset(range.from, range.to, chosen);
   const words = periodWords(preset, range.from, range.to);
   const q = (to: string) => `?from=${range.from}&to=${range.to}${to}`;
 
@@ -196,7 +197,10 @@ export function DashboardPage() {
               value={preset}
               onChange={(e) => {
                 const x = rangePresets().find((y) => y.key === e.target.value);
-                if (x) setRange({ from: x.from, to: x.to });
+                if (x) {
+                  setChosen(x.key);
+                  setRange({ from: x.from, to: x.to });
+                }
               }}
             >
               {rangePresets()

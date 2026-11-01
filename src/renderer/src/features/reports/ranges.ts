@@ -48,7 +48,14 @@ export function presetFor(range: DefaultRange | undefined, today = businessDateO
   return all.find((p) => p.key === (range ?? 'month')) ?? all.find((p) => p.key === 'month')!;
 }
 
-/** The preset matching a period, if any, so the selector shows "This month" rather than "Custom". */
-export function matchPreset(from: string, to: string, today = businessDateOf(new Date())): string {
-  return rangePresets(today).find((p) => p.from === from && p.to === to)?.key ?? 'custom';
+/**
+ * The preset matching a period, if any, so the selector shows "This month" rather than "Custom".
+ * Some cover the same days (on the 1st, "This month" is just today; on a Monday, so is "This
+ * week"): the one the person chose is kept while it still matches.
+ */
+export function matchPreset(from: string, to: string, chosen?: string, today = businessDateOf(new Date())): string {
+  const all = rangePresets(today);
+  const same = (p: RangePreset) => p.from === from && p.to === to;
+  if (chosen && all.some((p) => p.key === chosen && same(p))) return chosen;
+  return all.find(same)?.key ?? 'custom';
 }

@@ -9,8 +9,10 @@ import './styles.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     // Local data: no network retries or background refetch storms.
-    queries: { retry: false, refetchOnWindowFocus: false, staleTime: 10_000 },
-    mutations: { retry: false },
+    // 'always': requests go to this computer, never the network, so they must not wait while the
+    // computer reports itself offline (the default would hold every save until the internet is back).
+    queries: { retry: false, refetchOnWindowFocus: false, staleTime: 10_000, networkMode: 'always' },
+    mutations: { retry: false, networkMode: 'always' },
   },
 });
 
