@@ -26,7 +26,18 @@ function fakeOpenRouter(): Promise<{ server: Server; base: string; requests: { p
       if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { error: { code: 401, message: 'User not found.' } });
       if (req.url === '/api/v1/key') return send(200, { data: { limit_remaining: 4.5 } });
       if (req.url === '/api/v1/models') {
-        return send(200, { data: [{ id: MODEL, name: 'Test Vision', architecture: { input_modalities: ['text', 'image'] }, supported_parameters: ['structured_outputs'] }] });
+        return send(200, {
+          data: [
+            { id: 'test/text-model', name: 'Test Text', architecture: { input_modalities: ['text'] }, pricing: { prompt: '0', completion: '0' } },
+            {
+              id: MODEL,
+              name: 'Test Vision',
+              architecture: { input_modalities: ['text', 'image'] },
+              supported_parameters: ['structured_outputs'],
+              pricing: { prompt: '0.0000003', completion: '0.0000025' },
+            },
+          ],
+        });
       }
       if (req.url === '/api/v1/chat/completions') {
         bills++;
@@ -85,7 +96,20 @@ test('a supplier bill is scanned into a purchase, new items are added, and the n
     await page.getByRole('button', { name: 'Save key' }).click();
     await expect(page.getByText(/A key is saved, ending …cdef/)).toBeVisible();
     await page.getByRole('switch', { name: 'Scan supplier bills with AI' }).click();
-    await page.getByLabel('AI model').fill(MODEL);
+    // Any model OpenRouter offers can be chosen from its list.
+    await page.getByRole('button', { name: 'Choose from all models…' }).click();
+    const picker = page.getByRole('dialog', { name: 'Choose an AI model' });
+    const models = picker.getByTestId('ai-model');
+    await expect(picker.getByText('1 of 2 models shown · 1 can read bill photos.')).toBeVisible();
+    await picker.getByText('Only models that can read bill photos').click();
+    await expect(models).toHaveCount(2);
+    await expect(models.filter({ hasText: 'Test Text' })).toContainText('Free');
+    await page.screenshot({ path: join(shots, '79-ai-models.png') });
+    await picker.getByLabel('Search models').fill('vision');
+    await expect(models).toHaveCount(1);
+    await expect(models).toContainText('US$ 0.30 in · US$ 2.50 out, per million tokens');
+    await models.click();
+    await expect(page.getByLabel('AI model')).toHaveValue(MODEL);
     await page.getByRole('button', { name: 'Save AI settings' }).click();
     await expect(page.getByText('AI assistant settings saved')).toBeVisible();
     await page.getByRole('button', { name: 'Test connection' }).click();

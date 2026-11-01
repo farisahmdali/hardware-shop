@@ -225,3 +225,14 @@ The release installer is `Hardware Shop Manager Setup 1.1.0.exe`, 123,855,379 by
 | A real bill with a real OpenRouter key and model | **Not tested.** Needs the owner's own key. The requests follow OpenRouter's documented API (chat completions with an image or a PDF file part, structured output, the models and key endpoints); how well a given model reads a given bill can only be seen with real bills |
 
 The release installer is `Hardware Shop Manager Setup 1.2.0.exe`, 123,873,431 bytes, SHA-256 `7AECAEC6E78106C2903D71B0AEAA244329217D9FA52401141DDE7A0EF5B8ECB5`. The package check passed.
+
+## Version 1.2.1: choosing any OpenRouter model from a list (29 October 2026)
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | No errors |
+| `npm test` | 280 passed (1 skipped, as above), including a new `aiScan` test: every model OpenRouter lists, with what it reads and its price per million tokens (prices of -1, "varies", shown as not listed; entries without an id ignored), and the key required |
+| `npm run test:e2e` | 12 of 12 passed; `billScan` now chooses the model from the list: only models that read photos at first, all of them when unticked, search, price shown, the chosen id filled in |
+| A real OpenRouter models list | **Not tested.** Needs the owner's key; the fields read (`id`, `name`, `architecture.input_modalities`, `supported_parameters`, `pricing.prompt`, `pricing.completion`, `context_length`) are those of OpenRouter's documented models API |
+
+The release installer is `Hardware Shop Manager Setup 1.2.1.exe`, 123,874,615 bytes, SHA-256 `43B783A0DE835DD23BFC247402A89CA7AE18100C624C135CEF3AAC2DC9483C28`. The package check passed.

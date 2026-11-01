@@ -2,7 +2,7 @@ import type { HandlerMap } from './dispatcher';
 import type { DesktopUi } from './systemHandlers';
 import { canSeeCost } from './inventoryHandlers';
 import { canViewPurchasing } from './purchaseHandlers';
-import { aiStatus, assertCanScan, BILL_FILE_TYPES, clearApiKey, scanBill, setApiKey, testConnection } from '../services/ai/assistant';
+import { aiStatus, assertCanScan, BILL_FILE_TYPES, clearApiKey, listModels, scanBill, setApiKey, testConnection } from '../services/ai/assistant';
 import { listItemNames, removeItemName } from '../services/ai/supplierItemNames';
 import { AppError, ErrorCodes } from '@shared/errors';
 
@@ -25,6 +25,7 @@ export function aiHandlers(ui: DesktopUi): HandlerMap {
         return aiStatus(ctx.env, true);
       },
     },
+    'ai.models': { access: 'settings.manage', handle: (_i, ctx) => listModels(ctx.env) },
     'ai.test': { access: 'settings.manage', handle: (input, ctx) => testConnection(ctx.env, input.model) },
     'ai.scanBill': {
       access: 'purchases.manage',

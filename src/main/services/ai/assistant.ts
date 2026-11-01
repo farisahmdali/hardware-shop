@@ -17,7 +17,7 @@ import { analyseItem, ftsQueryFor, isClearBest, itemKey, mapUnit, scoreMatch } f
 import { AppError, ErrorCodes } from '@shared/errors';
 import { formatMoney } from '@shared/money';
 import { businessDateOf } from '@shared/time';
-import type { AiStatus, AiTestResult, ScanCandidate, ScanDraft, ScanLine, ScanSupplier } from '@shared/contracts';
+import type { AiModel, AiStatus, AiTestResult, ScanCandidate, ScanDraft, ScanLine, ScanSupplier } from '@shared/contracts';
 
 export const MAX_BILL_FILE_BYTES = 10 * 1024 * 1024;
 const SCAN_TIMEOUT_MS = 150_000;
@@ -136,6 +136,33 @@ async function modelInfo(env: AppEnv, api: OpenRouterClient, id: string, fresh =
   return info;
 }
 
+const canReadBills = (m: ModelInfo) => m.inputModalities.includes('image');
+const hasStructuredOutput = (m: ModelInfo) => m.supportedParameters.includes('structured_outputs') || m.supportedParameters.includes('response_format');
+const perMillion = (perToken: number | null) => (perToken === null ? null : Math.round(perToken * 1_000_000 * 1000) / 1000);
+
+/** Every model OpenRouter offers, for choosing one in the settings. Needs the saved key. */
+export async function listModels(env: AppEnv): Promise<AiModel[]> {
+  const api = await client(env);
+  const all = await api.models();
+  const d = deps(env);
+  if (!modelCaches.has(d)) modelCaches.set(d, new Map());
+  const cache = modelCaches.get(d)!;
+  const at = Date.now();
+  for (const m of all) cache.set(m.id, { info: m, at });
+  return all
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      readsImages: canReadBills(m),
+      readsPdf: m.inputModalities.includes('file'),
+      structuredOutput: hasStructuredOutput(m),
+      inputPrice: perMillion(m.promptPrice),
+      outputPrice: perMillion(m.completionPrice),
+      contextLength: m.contextLength,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+}
+
 export async function testConnection(env: AppEnv, model?: string): Promise<AiTestResult> {
   const id = (model ?? getAllSettings(env.db).ai.model).trim();
   if (!id) throw new AppError(ErrorCodes.VALIDATION, 'Enter the model to use, e.g. google/gemini-2.5-flash.');
@@ -146,9 +173,9 @@ export async function testConnection(env: AppEnv, model?: string): Promise<AiTes
   return {
     model: info.id,
     modelName: info.name,
-    readsImages: info.inputModalities.includes('image'),
+    readsImages: canReadBills(info),
     readsPdf: info.inputModalities.includes('file'),
-    structuredOutput: info.supportedParameters.includes('structured_outputs') || info.supportedParameters.includes('response_format'),
+    structuredOutput: hasStructuredOutput(info),
     creditLeft,
   };
 }
@@ -216,13 +243,13 @@ export async function scanBill(env: AppEnv, actor: Actor, path: string, opts: { 
   const info = await modelInfo(env, api, model);
   if (!info) throw new AppError(ErrorCodes.VALIDATION, `OpenRouter has no model called "${model}". Check the model in Backup & Settings → AI assistant.`);
   const isPdf = file.mime === 'application/pdf';
-  if (!isPdf && !info.inputModalities.includes('image')) {
+  if (!isPdf && !canReadBills(info)) {
     throw new AppError(ErrorCodes.BUSINESS_RULE, `The model ${info.name} cannot read images. Choose a model that can (Backup & Settings → AI assistant).`);
   }
 
   const dataUrl = `data:${file.mime};base64,${file.data.toString('base64')}`;
   const part = isPdf ? { type: 'file', file: { filename: file.name, file_data: dataUrl } } : { type: 'image_url', image_url: { url: dataUrl } };
-  const structured = info.supportedParameters.includes('structured_outputs') || info.supportedParameters.includes('response_format');
+  const structured = hasStructuredOutput(info);
   const body: Record<string, unknown> = {
     model,
     temperature: 0,

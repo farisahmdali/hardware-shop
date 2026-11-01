@@ -164,7 +164,7 @@ Instead of typing a bill, you can let an AI model read a photo or PDF of it. You
 
 1. Create an account at openrouter.ai, add a little credit, and create an API key (**Keys**). Reading one bill usually costs well under a rupee.
 2. In **Backup & Settings → AI assistant**, paste the key and click **Save key**. It is kept encrypted on this computer for your Windows user. It is not part of backups, so after setting up a new computer, enter it again.
-3. Enter the **AI model**: the model id from openrouter.ai/models. It must be able to read images (for example a Gemini, GPT or Claude model). Switch on **Scan supplier bills with AI**, set how many bills may be scanned per month, and click **Save AI settings**.
+3. Choose the **AI model**. Click **Choose from all models…** to see every model OpenRouter offers, with its price and what it can read; search by name (gemini, gpt, claude, free…), sort by price, and click one. Any model that can read images works (the list shows only those unless you untick **Only models that can read bill photos**). You can also type a model id from openrouter.ai/models. Switch on **Scan supplier bills with AI**, set how many bills may be scanned per month, and click **Save AI settings**.
 4. Click **Test connection**. It checks the key and tells you whether the model can read bills.
 
 Only the bill file you choose is sent, to OpenRouter and the company running the model. Your products, customers, sales and accounts never leave the computer. Every bill read (and every failed attempt) is in **History** with the file name, the model and what it cost, but never the key or the bill itself.

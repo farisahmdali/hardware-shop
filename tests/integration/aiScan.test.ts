@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { transact } from '@main/db/tx';
 import type { KeyCipher } from '@main/services/env';
-import { aiStatus, assertCanScan, clearApiKey, readApiKey, scanBill, setApiKey, testConnection } from '@main/services/ai/assistant';
+import { aiStatus, assertCanScan, clearApiKey, listModels, readApiKey, scanBill, setApiKey, testConnection } from '@main/services/ai/assistant';
 import { listItemNames, removeItemName } from '@main/services/ai/supplierItemNames';
 import { createPurchase } from '@main/services/purchases';
 import { updateSettingsSection } from '@main/services/settings';
@@ -60,8 +60,17 @@ class FakeOpenRouter {
     if (url.endsWith('/models')) {
       return Response.json({
         data: [
-          { id: 'other/model', name: 'Other', architecture: { input_modalities: ['text'] }, supported_parameters: [] },
-          { id: MODEL, name: 'Test Vision', architecture: { input_modalities: this.modalities }, supported_parameters: this.parameters },
+          { id: 'other/model', name: 'Other', architecture: { input_modalities: ['text'] }, supported_parameters: [], pricing: { prompt: '0', completion: '0' } },
+          {
+            id: MODEL,
+            name: 'Test Vision',
+            context_length: 1048576,
+            architecture: { input_modalities: this.modalities },
+            supported_parameters: this.parameters,
+            pricing: { prompt: '0.0000003', completion: '0.0000025', image: '0.001238' },
+          },
+          { id: 'openrouter/auto', name: 'Auto Router', architecture: { input_modalities: ['text', 'image', 'file'] }, pricing: { prompt: '-1', completion: '-1' } },
+          { name: 'no id' },
         ],
       });
     }
@@ -178,6 +187,17 @@ describe('testing the connection', () => {
     expect((await testConnection(env, 'other/model')).readsImages).toBe(false);
     await expect(testConnection(env, 'no/such-model')).rejects.toThrow('OpenRouter has no model called "no/such-model"');
     expect(api.calls.every((c) => c.headers.Authorization === `Bearer ${KEY}`)).toBe(true);
+  });
+
+  it('lists every model OpenRouter offers, with what each can read and its price', async () => {
+    await expect(listModels(env)).rejects.toThrow('Save your OpenRouter API key');
+    await setApiKey(env, actor, KEY);
+    expect(await listModels(env)).toEqual([
+      { id: 'openrouter/auto', name: 'Auto Router', readsImages: true, readsPdf: true, structuredOutput: false, inputPrice: null, outputPrice: null, contextLength: null },
+      { id: 'other/model', name: 'Other', readsImages: false, readsPdf: false, structuredOutput: false, inputPrice: 0, outputPrice: 0, contextLength: null },
+      { id: MODEL, name: 'Test Vision', readsImages: true, readsPdf: false, structuredOutput: true, inputPrice: 0.3, outputPrice: 2.5, contextLength: 1048576 },
+    ]);
+    expect(api.calls.at(-1)!.headers.Authorization).toBe(`Bearer ${KEY}`);
   });
 
   it('explains a wrong key and no internet', async () => {

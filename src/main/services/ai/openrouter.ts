@@ -20,6 +20,37 @@ export interface ModelInfo {
   name: string;
   inputModalities: string[];
   supportedParameters: string[];
+  /** US dollars per token, as OpenRouter lists them; null when not listed. */
+  promptPrice: number | null;
+  completionPrice: number | null;
+  contextLength: number | null;
+}
+
+interface ApiModel {
+  id: string;
+  name?: string;
+  context_length?: number | null;
+  architecture?: { input_modalities?: string[] };
+  supported_parameters?: string[];
+  pricing?: { prompt?: string | number; completion?: string | number };
+}
+
+const price = (v: string | number | undefined): number | null => {
+  const n = typeof v === 'number' ? v : v === undefined ? NaN : Number(v);
+  // OpenRouter uses -1 for "varies" (router models).
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+function toModelInfo(m: ApiModel): ModelInfo {
+  return {
+    id: m.id,
+    name: m.name ?? m.id,
+    inputModalities: m.architecture?.input_modalities ?? [],
+    supportedParameters: m.supported_parameters ?? [],
+    promptPrice: price(m.pricing?.prompt),
+    completionPrice: price(m.pricing?.completion),
+    contextLength: typeof m.context_length === 'number' ? m.context_length : null,
+  };
 }
 
 export interface ChatResult {
@@ -110,18 +141,14 @@ export class OpenRouterClient {
     return { creditLeft: typeof left === 'number' ? left : null };
   }
 
+  /** Every model OpenRouter offers. */
+  async models(): Promise<ModelInfo[]> {
+    const r = (await this.request('/models', { method: 'GET', timeoutMs: 30_000 })) as { data?: ApiModel[] };
+    return (r.data ?? []).filter((m) => typeof m?.id === 'string' && m.id).map(toModelInfo);
+  }
+
   async model(id: string): Promise<ModelInfo | null> {
-    const r = (await this.request('/models', { method: 'GET', timeoutMs: 30_000 })) as {
-      data?: { id: string; name?: string; architecture?: { input_modalities?: string[] }; supported_parameters?: string[] }[];
-    };
-    const m = (r.data ?? []).find((x) => x.id === id);
-    if (!m) return null;
-    return {
-      id: m.id,
-      name: m.name ?? m.id,
-      inputModalities: m.architecture?.input_modalities ?? [],
-      supportedParameters: m.supported_parameters ?? [],
-    };
+    return (await this.models()).find((m) => m.id === id) ?? null;
   }
 
   async chat(body: Record<string, unknown>, timeoutMs: number): Promise<ChatResult> {

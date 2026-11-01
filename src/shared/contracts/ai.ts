@@ -31,7 +31,22 @@ export interface AiTestResult {
   creditLeft: number | null;
 }
 
-export type ScanMatchHow = 'REMEMBERED' | 'CODE' | 'BEST';
+/** A model offered by OpenRouter, for choosing one in the settings. */
+export interface AiModel {
+  id: string;
+  name: string;
+  /** Reads images, so it can read bill photos. */
+  readsImages: boolean;
+  readsPdf: boolean;
+  structuredOutput: boolean;
+  /** US dollars per million tokens read and written; null when OpenRouter lists no price. */
+  inputPrice: number | null;
+  outputPrice: number | null;
+  /** Tokens. */
+  contextLength: number | null;
+}
+
+export type ScanMatchHow ='REMEMBERED' | 'CODE' | 'BEST';
 
 export interface ScanCandidate {
   product: ProductListRow;
@@ -118,6 +133,8 @@ export const aiCommands = {
     }),
   ),
   'ai.clearKey': command<AiStatus>()(z.object({})),
+  /** Every model OpenRouter offers, looked up with the saved key. */
+  'ai.models': command<AiModel[]>()(z.object({})),
   /** Checks the saved key and a model (the one typed, or the saved one). */
   'ai.test': command<AiTestResult>()(z.object({ model: z.string().trim().max(120).optional() })),
   /** Asks for a bill file and reads it. Nothing is saved except the history entry. */
