@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Search } from 'lucide-react';
 import { formatMoney } from '@shared/money';
-import { formatDate, formatDateTime } from '@shared/time';
+import { formatDate, formatDateTime, formatDocDate } from '@shared/time';
 import { useCommandQuery } from '../../lib/api';
 import { useDebounced } from '../../lib/useDebounced';
 import { Input, Select } from '../../components/ui/form';
@@ -90,7 +90,7 @@ export function InvoicesTable({ customerId, initialStatus = 'ALL' }: { customerI
                   onKeyDown={(e) => e.key === 'Enter' && navigate(`/sales/invoices/${r.id}`)}
                 >
                   <Td className="font-mono text-[13px] whitespace-nowrap">{r.invoiceNo}</Td>
-                  <Td className="tabular whitespace-nowrap">{formatDateTime(r.issuedAt)}</Td>
+                  <Td className="tabular whitespace-nowrap">{formatDocDate(r.issuedAt, r.businessDate)}</Td>
                   {!customerId && (
                     <Td>
                       {r.customerName}

@@ -1,5 +1,5 @@
 import type { Db } from '../db/connection';
-import { transact, type Actor, type Tx } from '../db/tx';
+import { pastBusinessDate, transact, type Actor, type Tx } from '../db/tx';
 import type { AppEnv } from './env';
 import {
   allocate,
@@ -15,6 +15,7 @@ import { postLedger, type AccountCode } from './ledger';
 import { getAllSettings } from './settings';
 import { AppError, ErrorCodes } from '@shared/errors';
 import { formatMoney } from '@shared/money';
+import { formatDate } from '@shared/time';
 import type { AgeingReport, Paged, PaymentMethodRow, PaymentRow, ReceivableRow } from '@shared/contracts';
 
 // ---------- Payment methods ----------
@@ -136,7 +137,15 @@ export function insertPayment(tx: Tx, p: PaymentInsert): number {
     entityType: 'payment',
     entityId: id,
     action: p.direction === 'IN' ? 'PAYMENT_RECEIVED' : 'REFUND_PAID',
-    after: { paymentNo, customerId: p.customerId, amount: p.amount, method: method.name, reference: p.reference, notes: p.notes },
+    after: {
+      paymentNo,
+      ...(tx.backDated ? { paymentDate: tx.businessDate } : {}),
+      customerId: p.customerId,
+      amount: p.amount,
+      method: method.name,
+      reference: p.reference,
+      notes: p.notes,
+    },
     relatedType: 'customer',
     relatedId: p.customerId,
   });
@@ -160,27 +169,41 @@ export function receivePayment(
     reference: string;
     notes: string;
     allocations: { docType: 'INVOICE' | 'ADJUSTMENT'; docId: number; amount: number }[];
+    /** The day the money was received, when it is not today. */
+    paymentDate?: string;
   },
 ): PaymentRow {
-  const id = transact(env, actor, (tx) =>
-    tx.once(input.requestId, 'payments.receive', () => {
-      assertAccountCustomer(tx.db, input.customerId);
-      const chosen = input.allocations.reduce((a, x) => a + x.amount, 0);
-      if (chosen > input.amount) throw new AppError(ErrorCodes.VALIDATION, 'The amounts applied to bills are more than the payment.');
-      const paymentId = insertPayment(tx, { ...input, direction: 'IN', purpose: 'RECEIPT' });
-      for (const a of input.allocations) {
-        const owner = tx.db
-          .prepare('SELECT customer_id FROM v_receivables WHERE doc_type = ? AND doc_id = ?')
-          .get(a.docType, a.docId) as { customer_id: number } | undefined;
-        if (!owner || owner.customer_id !== input.customerId) throw new AppError(ErrorCodes.VALIDATION, 'A chosen bill belongs to another customer.');
-        const open = receivableOutstanding(tx.db, a.docType, a.docId);
-        if (a.amount > open) throw new AppError(ErrorCodes.VALIDATION, `Only ${formatMoney(open)} is still owed on one of the chosen bills.`);
-        allocate(tx, { type: 'PAYMENT', id: paymentId }, { type: a.docType, id: a.docId }, a.amount);
-      }
-      // Whatever is left settles the oldest open bills; any remainder stays as advance credit.
-      applyCreditFifo(tx, input.customerId, { onlySource: { type: 'PAYMENT', id: paymentId } });
-      return paymentId;
-    }),
+  // Money received on an earlier day belongs to that day: cash, accounts and receipt number.
+  const paymentDate = pastBusinessDate(env, input.paymentDate, 'A payment');
+  const id = transact(
+    env,
+    actor,
+    (tx) =>
+      tx.once(input.requestId, 'payments.receive', () => {
+        assertAccountCustomer(tx.db, input.customerId);
+        const chosen = input.allocations.reduce((a, x) => a + x.amount, 0);
+        if (chosen > input.amount) throw new AppError(ErrorCodes.VALIDATION, 'The amounts applied to bills are more than the payment.');
+        const paymentId = insertPayment(tx, { ...input, direction: 'IN', purpose: 'RECEIPT' });
+        for (const a of input.allocations) {
+          const owner = tx.db
+            .prepare('SELECT customer_id, doc_no, business_date FROM v_receivables WHERE doc_type = ? AND doc_id = ?')
+            .get(a.docType, a.docId) as { customer_id: number; doc_no: string; business_date: string } | undefined;
+          if (!owner || owner.customer_id !== input.customerId) throw new AppError(ErrorCodes.VALIDATION, 'A chosen bill belongs to another customer.');
+          if (owner.business_date > tx.businessDate) {
+            throw new AppError(
+              ErrorCodes.VALIDATION,
+              `${owner.doc_no} is dated ${formatDate(owner.business_date)}, so a payment for it cannot be dated earlier.`,
+            );
+          }
+          const open = receivableOutstanding(tx.db, a.docType, a.docId);
+          if (a.amount > open) throw new AppError(ErrorCodes.VALIDATION, `Only ${formatMoney(open)} is still owed on one of the chosen bills.`);
+          allocate(tx, { type: 'PAYMENT', id: paymentId }, { type: a.docType, id: a.docId }, a.amount);
+        }
+        // Whatever is left settles the oldest open bills; any remainder stays as advance credit.
+        applyCreditFifo(tx, input.customerId, { onlySource: { type: 'PAYMENT', id: paymentId } });
+        return paymentId;
+      }),
+    { businessDate: paymentDate },
   );
   return getPayment(env.db, id);
 }

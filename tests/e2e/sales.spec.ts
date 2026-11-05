@@ -27,6 +27,9 @@ test('sales: walk-in bill with change, PDF, credit customer, payment, return, ca
   await expect(page.getByRole('option', { name: /LED bulb 9 W/ })).toBeVisible();
   await search.press('Enter');
   await expect(page.getByLabel('Quantity of LED bulb 9 W')).toHaveValue('2');
+  // The item just added is on top while billing.
+  const walkInRows = page.getByRole('row').filter({ hasText: /Claw hammer 450 g|LED bulb 9 W/ });
+  await expect(walkInRows).toHaveText([/LED bulb 9 W/, /Claw hammer 450 g/]);
   // ₹450 + 2 × ₹99 = ₹648
   await expect(page.getByRole('button', { name: /Save bill · ₹648.00/ })).toBeDisabled();
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
@@ -69,6 +72,15 @@ test('sales: walk-in bill with change, PDF, credit customer, payment, return, ca
   await page.getByRole('row').filter({ hasText: 'INV/2026-27/00002' }).click();
   await expect(page.getByText('Part paid').first()).toBeVisible();
   await page.getByRole('button', { name: 'Receive payment' }).click();
+  // The payment date starts at today and cannot be before the bill's own date.
+  const isoToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  const paymentDate = page.getByLabel('Payment date');
+  await expect(paymentDate).toHaveValue(isoToday);
+  await paymentDate.fill(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() - 86_400_000)));
+  await expect(page.getByText(/^INV\/2026-27\/00002 is dated .*, so a payment for it cannot be dated earlier\.$/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record payment' })).toBeDisabled();
+  await page.screenshot({ path: join(shots, '29-payment-date.png') });
+  await paymentDate.fill(isoToday);
   await page.getByRole('button', { name: 'Record payment' }).click();
   await expect(page.getByText(/Payment RCPT\/2026-27\/00003 recorded/)).toBeVisible();
   await expect(page.getByText('Paid', { exact: true }).first()).toBeVisible();
@@ -81,6 +93,8 @@ test('sales: walk-in bill with change, PDF, credit customer, payment, return, ca
   // ---- Return one hammer from the walk-in invoice, refunded in cash ----
   await page.getByRole('link', { name: 'Invoices' }).first().click();
   await page.getByRole('row').filter({ hasText: 'INV/2026-27/00001' }).click();
+  // The saved invoice lists the items in the order they were added.
+  await expect(walkInRows).toHaveText([/Claw hammer 450 g/, /LED bulb 9 W/]);
   await page.getByRole('button', { name: 'Return items' }).click();
   await page.getByLabel('Return quantity of Claw hammer 450 g').fill('1');
   await page.getByRole('dialog').getByLabel(/^Reason/).fill('Handle loose');
@@ -117,6 +131,34 @@ test('sales: walk-in bill with change, PDF, credit customer, payment, return, ca
   // ₹648 sold, ₹450 returned; the cancelled credit sale does not count.
   await expect(page.getByRole('link', { name: /Sales today/ })).toContainText('₹198.00');
   await page.screenshot({ path: join(shots, '26-dashboard-sales.png') });
+
+  // ---- A bill written by hand yesterday, entered today with its own date ----
+  const isoDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+  const today = isoDay(new Date());
+  const yesterday = isoDay(new Date(Date.now() - 86_400_000));
+  const shown = (iso: string) => new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(new Date(`${iso}T12:00:00+05:30`));
+  await nav.getByRole('link', { name: 'Sales & Billing' }).click();
+  const billDate = page.getByLabel('Bill date');
+  await expect(billDate).toHaveValue(today);
+  await search.fill('claw ham');
+  await search.press('Enter');
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await billDate.fill(isoDay(new Date(Date.now() + 86_400_000)));
+  await expect(page.getByText('The bill date cannot be in the future.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Save bill/ })).toBeDisabled();
+  await billDate.fill(yesterday);
+  await expect(page.getByText(`Past date: counts on ${shown(yesterday)}`)).toBeVisible();
+  await page.screenshot({ path: join(shots, '28-bill-dated.png') });
+  await page.keyboard.press('F9');
+  await expect(page.getByText(/INV\/\d{4}-\d{2}\/\d{5}/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'New bill (Enter)' }).click();
+  await expect(billDate).toHaveValue(today);
+  await page.getByRole('link', { name: 'Invoices' }).click();
+  // Newest first: the bill shows the day it is dated, not when it was entered.
+  await expect(page.getByRole('row').nth(1)).toContainText(shown(yesterday));
+  await nav.getByRole('link', { name: 'Dashboard' }).click();
+  // Not today's sale.
+  await expect(page.getByRole('link', { name: /Sales today/ })).toContainText('₹198.00');
 
   // ---- Everything reconciles ----
   await nav.getByRole('link', { name: 'Backup & Settings' }).click();

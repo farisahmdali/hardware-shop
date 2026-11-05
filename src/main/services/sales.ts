@@ -1,5 +1,5 @@
 import type { Db } from '../db/connection';
-import { transact, type Actor, type Tx } from '../db/tx';
+import { pastBusinessDate, transact, type Actor, type Tx } from '../db/tx';
 import type { AppEnv } from './env';
 import { allocate, applyCreditFifo, availableCredit, releaseTarget } from './allocations';
 import { postLedger, type AccountCode, type LedgerLine } from './ledger';
@@ -38,6 +38,8 @@ export interface FinalizeInput {
   notes: string;
   expectedGrandTotal: number;
   negativeStockReason?: string;
+  /** The day of the sale when it is not today. */
+  billDate?: string;
 }
 
 interface ProductForSale {
@@ -110,8 +112,14 @@ function mirror(lines: LedgerLine[]): LedgerLine[] {
  * saved or none of it. A repeated request returns the first result.
  */
 export function finalizeSale(env: AppEnv, actor: Actor, perms: SalesPermissions, input: FinalizeInput) {
-  return transact(env, actor, (tx) => tx.once(input.requestId, 'sales.finalize', () => finalizeSaleTx(tx, perms, input)));
+  // A bill written by hand and entered later belongs to its own day: invoice, number series,
+  // stock, accounts and payments.
+  const billDate = pastBusinessDate(env, input.billDate, 'A bill');
+  return transact(env, actor, (tx) => tx.once(input.requestId, 'sales.finalize', () => finalizeSaleTx(tx, perms, { ...input, billDate })), {
+    businessDate: billDate,
+  });
 }
+
 
 /**
  * The sale itself, inside an open transaction. Also used when products are sold together
@@ -293,6 +301,7 @@ export function finalizeSaleTx(tx: Tx, perms: SalesPermissions, input: FinalizeI
     action: 'CREATE',
     after: {
       invoiceNo,
+      ...(input.billDate ? { billDate: input.billDate } : {}),
       customer: walkIn ? input.walkInName || 'Walk-in customer' : customer.name,
       items: input.lines.length,
       grossTotal: bill.grossTotal,
@@ -640,6 +649,10 @@ export function getInvoice(db: Db, id: number, canSeeCost: boolean, asOf: string
                 WHEN 'PAYMENT' THEN (SELECT received_at FROM payments WHERE id = a.source_id)
                 WHEN 'CREDIT_NOTE' THEN (SELECT issued_at FROM credit_notes WHERE id = a.source_id)
                 ELSE (SELECT created_at FROM balance_adjustments WHERE id = a.source_id) END AS date,
+              CASE a.source_type
+                WHEN 'PAYMENT' THEN (SELECT business_date FROM payments WHERE id = a.source_id)
+                WHEN 'CREDIT_NOTE' THEN (SELECT business_date FROM credit_notes WHERE id = a.source_id)
+                ELSE (SELECT business_date FROM balance_adjustments WHERE id = a.source_id) END AS business_date,
               CASE WHEN a.source_type = 'PAYMENT'
                 THEN (SELECT m.name FROM payments p JOIN payment_methods m ON m.id = p.method_id WHERE p.id = a.source_id) END AS method_name,
               CASE WHEN a.source_type = 'PAYMENT'
@@ -647,7 +660,16 @@ export function getInvoice(db: Db, id: number, canSeeCost: boolean, asOf: string
        FROM allocations a WHERE a.target_type = 'INVOICE' AND a.target_id = ?
        GROUP BY a.source_type, a.source_id ORDER BY MIN(a.id)`,
     )
-    .all(id) as { kind: SettlementRow['kind']; source_id: number; amount: number; doc_no: string; date: string; method_name: string | null; reversed: number }[];
+    .all(id) as {
+      kind: SettlementRow['kind'];
+      source_id: number;
+      amount: number;
+      doc_no: string;
+      date: string;
+      business_date: string;
+      method_name: string | null;
+      reversed: number;
+    }[];
   const creditNotes = db
     .prepare(
       `SELECT cn.id, cn.credit_note_no, cn.issued_at, cn.total, cn.settlement, cn.reason, u.username
@@ -713,6 +735,7 @@ export function getInvoice(db: Db, id: number, canSeeCost: boolean, asOf: string
         sourceId: s.source_id,
         docNo: s.doc_no,
         date: s.date,
+        businessDate: s.business_date,
         methodName: s.method_name,
         amount: s.amount,
         reversed: s.reversed === 1,

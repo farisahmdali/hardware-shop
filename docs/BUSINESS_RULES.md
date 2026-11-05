@@ -11,6 +11,7 @@ These rules decide how money, tax, stock and rentals behave. A rule marked *(set
 | 3 | Quantities are stored as thousandths of a unit. Pieces, boxes and sets take whole numbers only; kg, g, m, ft, L and sq ft allow three decimals. | 1 |
 | 4 | Times are stored in UTC. Each record also stores its **business date**, the calendar date in India (Asia/Kolkata), and daily reports group by that date. | 1 |
 | 5 | Document numbers run per Indian financial year (April–March) and have no gaps: `INV/2026-27/00001`. A failed operation does not use up a number. | 1 |
+| 5a | **A sale can be dated in the past** (a bill written by hand and entered later): any earlier day, never a future one. Anyone who can make bills can change the date; it starts as today on every new bill. Everything the sale records belongs to that day: the invoice, its due date, the stock it takes, its accounts and GST, and the payment taken with it. Its number comes from that day's financial year, so a bill dated 31 March takes the next number of the year that ended. The history records when it was actually entered, by whom, and the date it was given. A bill dated in the past changes that day's figures, including a cash count already made for that day. | 1.2.3 |
 
 ## GST
 
@@ -61,6 +62,7 @@ These rules decide how money, tax, stock and rentals behave. A rule marked *(set
 |---|---|---|
 | 21 | Walk-in sales need no customer profile. Credit (unpaid or part-paid) sales need a registered customer. | 3 |
 | 22 | An invoice falls due after the customer's credit period *(setting, default 30 days)*. Ageing buckets default to 0–30, 31–60, 61–90 and over 90 days *(setting)*. | 3, 6 |
+| 22a | **A payment can be dated in the past** (money received earlier and entered later): any earlier day, never a future one, and never before the date of a bill it is chosen to pay. Anyone who can record payments can change the date; it starts as today. The payment, its receipt number (from that day's financial year) and its accounts belong to that day; the history records when it was really entered and the date it was given. Money left over after the chosen bill settles other open bills as usual. | 1.2.4 |
 | 23 | Money owed **by** customers and money owed **to** suppliers are kept in separate accounts and are never netted. | 3, 5 |
 | 23a | A payment settles the bills chosen for it first, then the oldest open bills (opening balances before invoices on the same day). Anything left over is kept as advance credit. | 3 |
 | 23b | Existing credit is used for a new bill only when the cashier chooses to at the counter. Credit from a return or a credit adjustment settles the oldest open bills automatically. On a customer's page, "Use credit for open bills" applies any remaining credit. | 3 |

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, PauseCircle, Percent, Plus, ShoppingCart, Trash2, UserRound, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, PauseCircle, Percent, Plus, ShoppingCart, Trash2, UserRound, X } from 'lucide-react';
 import { computeBill } from '@shared/billing';
 import { formatMoney, mulDivRound } from '@shared/money';
 import { formatQty } from '@shared/qty';
+import { businessDateOf, formatDate } from '@shared/time';
 import type { CustomerDetail, CustomerRow, DiscountInput, PaymentMethodRow } from '@shared/contracts';
 import { ApiError, call, errorMessage, useCommandQuery } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -73,6 +74,9 @@ export function BillingPage() {
   const isWalkin = !state.customer || state.customer.isWalkin;
   const shopState = settings.data?.shop.stateCode ?? '';
   const interstate = !isWalkin && !!customer?.stateCode && customer.stateCode !== shopState;
+  const today = businessDateOf(new Date());
+  const billDate = state.billDate ?? today;
+  const backDated = billDate < today;
 
   const bill = useMemo(
     () =>
@@ -115,6 +119,7 @@ export function BillingPage() {
   if (bill.discountTotal > maxDiscount) problems.push(`Discount is above your limit of ${session.maxDiscountBp / 100}%.`);
   if (shortLines.length > 0 && !(override && overrideReason.trim().length >= 3)) problems.push('Some items are short of stock.');
   if (payments.some((p) => p.amount === null || p.amount <= 0)) problems.push('Enter an amount for each payment.');
+  if (billDate > today) problems.push('The bill date cannot be in the future.');
 
   const newBill = useCallback(
     (force = false) => {
@@ -167,6 +172,7 @@ export function BillingPage() {
         notes: state.notes,
         expectedGrandTotal: bill.grandTotal,
         negativeStockReason: shortLines.length > 0 ? overrideReason.trim() : undefined,
+        billDate: state.billDate ?? undefined,
       });
       setDone({ ...r, change: Math.max(0, change) });
       await qc.invalidateQueries({
@@ -222,7 +228,28 @@ export function BillingPage() {
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <SalesTabs />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {backDated && (
+            <span
+              className="flex items-center gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-[13px] text-warning"
+              role="status"
+              title="The bill, its payment and the stock it takes count on that day in sales, cash and GST."
+            >
+              <CalendarClock className="size-4" />
+              Past date: counts on {formatDate(billDate)}
+            </span>
+          )}
+          <label className="flex items-center gap-2 text-[13px] text-ink-2">
+            Bill date
+            <Input
+              type="date"
+              aria-label="Bill date"
+              className={cn('h-9 w-40', backDated && 'border-warning')}
+              value={billDate}
+              max={today}
+              onChange={(e) => cart.setBillDate(e.target.value && e.target.value !== today ? e.target.value : null)}
+            />
+          </label>
           <Button variant="ghost" icon={<PauseCircle className="size-4" />} disabled={state.lines.length === 0} onClick={() => setHolding(true)}>
             Hold bill
           </Button>
@@ -258,7 +285,8 @@ export function BillingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {state.lines.map((l, i) => {
+                  {/* Newest item on top while billing; the saved bill keeps the order items were added in. */}
+                  {[...state.lines.entries()].reverse().map(([i, l]) => {
                     const short = shortLines.includes(l);
                     return (
                       <tr key={l.key} className="border-b border-line">

@@ -8,7 +8,7 @@ import { AppError, ErrorCodes } from '@shared/errors';
 import { amountInWords } from '@shared/billing';
 import { formatMoney } from '@shared/money';
 import { formatQty } from '@shared/qty';
-import { formatDate, formatDateTime } from '@shared/time';
+import { formatDate, formatDateTime, formatDocDate } from '@shared/time';
 import { stateName } from '@shared/gstStates';
 import type { DocumentKind, InvoiceDetail, Paper } from '@shared/contracts';
 
@@ -122,7 +122,7 @@ function invoiceA4(db: Db, inv: InvoiceDetail): string {
       <div class="r">
         <h2>${title}</h2>
         <div style="margin-top:6px">Invoice no: <span class="b">${esc(inv.invoiceNo)}</span></div>
-        <div>Date: ${esc(formatDateTime(inv.issuedAt))}</div>
+        <div>Date: ${esc(formatDocDate(inv.issuedAt, inv.businessDate))}</div>
         ${inv.outstanding > 0 ? `<div>Due date: ${esc(formatDate(inv.dueDate))}</div>` : ''}
         ${inv.status === 'CANCELLED' ? '<div style="margin-top:8px"><span class="stamp">CANCELLED</span></div>' : ''}
       </div>
@@ -185,7 +185,7 @@ function invoiceThermal(db: Db, inv: InvoiceDetail, widthMm: number): string {
     <div class="center"><div class="big">${esc(s.shop.name)}</div>${address.map((a) => `<div>${esc(a)}</div>`).join('')}
       ${s.shop.phone ? `<div>Ph: ${esc(s.shop.phone)}</div>` : ''}${s.shop.gstin ? `<div>GSTIN: ${esc(s.shop.gstin)}</div>` : ''}</div>
     <hr><div class="center b">${inv.gstRegistered ? 'TAX INVOICE' : 'BILL OF SUPPLY'}${inv.status === 'CANCELLED' ? ' — CANCELLED' : ''}</div>
-    <div>${esc(inv.invoiceNo)}</div><div>${esc(formatDateTime(inv.issuedAt))}</div>
+    <div>${esc(inv.invoiceNo)}</div><div>${esc(formatDocDate(inv.issuedAt, inv.businessDate))}</div>
     ${inv.customerName ? `<div>Customer: ${esc(inv.customerName)}</div>` : ''}
     <hr><table>${rows}</table><hr>
     <table>

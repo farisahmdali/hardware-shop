@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Wallet } from 'lucide-react';
 import type { PaymentRow } from '@shared/contracts';
 import { formatMoney } from '@shared/money';
-import { formatDateTime } from '@shared/time';
+import { formatDocDate } from '@shared/time';
 import { errorMessage, useCommandMutation, useCommandQuery } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { useToast } from '../../lib/toast';
@@ -78,7 +78,7 @@ export function PaymentsTable({ customerId }: { customerId?: number }) {
                     )}
                   </Td>
                   <Td className="tabular whitespace-nowrap">
-                    {formatDateTime(p.receivedAt)} <span className="text-ink-3">· {p.username}</span>
+                    {formatDocDate(p.receivedAt, p.businessDate)} <span className="text-ink-3">· {p.username}</span>
                   </Td>
                   {!customerId && (
                     <Td>

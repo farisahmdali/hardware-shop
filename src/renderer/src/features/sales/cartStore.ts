@@ -39,6 +39,8 @@ export interface CartState {
   lines: CartLine[];
   billDiscount: DiscountInput;
   notes: string;
+  /** The day of the sale when it is not today; null means today. */
+  billDate: string | null;
   /** Changes for every new bill, so the finalize request id is fresh per bill but stable across retries. */
   billId: string;
 }
@@ -50,6 +52,7 @@ const emptyCart = (): CartState => ({
   lines: [],
   billDiscount: null,
   notes: '',
+  billDate: null,
   billId: crypto.randomUUID(),
 });
 
@@ -110,6 +113,9 @@ export const cart = {
   setNotes(notes: string) {
     set({ ...state, notes });
   },
+  setBillDate(billDate: string | null) {
+    set({ ...state, billDate });
+  },
   toDraft(): CartDraft {
     return {
       customerId: state.customer?.isWalkin ? null : (state.customer?.id ?? null),
@@ -118,6 +124,7 @@ export const cart = {
       lines: state.lines.map((l) => ({ productId: l.product.id, qty: l.qty, discount: l.discount })),
       billDiscount: state.billDiscount,
       notes: state.notes,
+      ...(state.billDate ? { billDate: state.billDate } : {}),
     };
   },
   load(next: Omit<CartState, 'billId'>) {

@@ -80,6 +80,8 @@ Good to know:
 - The bill total is worked out with GST (CGST and SGST, or IGST for a customer in another state). The application checks the total again when saving; if a price changed meanwhile, it asks you to **Refresh prices**.
 - You cannot sell more than is in stock. The owner can allow an exception, which needs a reason and is recorded.
 - **Hold bill** parks a bill (for example while the customer fetches something). Open it again from **Held bills**.
+- The **Bill date** is today. To enter a bill written by hand on an earlier day, change it before saving: the bill, its payment and the stock it takes then count on that day in sales, cash and GST reports, and it is printed with that date. A future date is not allowed. **Past date: counts on …** reminds you while it is set, and the next bill starts at today again. The history keeps when the bill was really entered. If you already counted the cash for that day, count it again.
+- The item you added last is at the top of the list; the saved bill lists items in the order you added them.
 - **F2** starts a new bill.
 - Pressing **Save bill** twice, or a slow computer, never creates two bills.
 
@@ -94,7 +96,7 @@ Past bills are under **Sales & Billing → Invoices**. Open one to reprint it, s
 
 **Credit sales.** A registered customer can take goods and pay later. Each bill is due after the customer's credit period (30 days unless set otherwise on the customer).
 
-**Receiving a payment.** On the customer, click **Receive payment** (or **Payments & Outstanding → Receive payment**). Enter the amount and method, then **Record payment**. The payment settles the oldest open bills first unless you pick bills yourself. Money paid beyond what is owed stays as the customer's credit (an advance).
+**Receiving a payment.** On the customer, click **Receive payment** (or **Payments & Outstanding → Receive payment**). Enter the amount and method, then **Record payment**. The **Payment date** is today; if the money came in on an earlier day, change it so the payment counts on that day in cash and accounts (a future date, or a date before the bill being paid, is not allowed; the history keeps when it was really entered). The payment settles the oldest open bills first unless you pick bills yourself. Money paid beyond what is owed stays as the customer's credit (an advance).
 
 **Credit.** A customer's credit (an advance, or the value of returned goods) can be used for open bills with **Use credit for open bills**, or given back with **Refund credit**.
 

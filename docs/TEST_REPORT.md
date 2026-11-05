@@ -251,3 +251,27 @@ Also fixed: on the 1st of the month, choosing **This month** on the dashboard or
 | On a Mac | **Not tested here** (a Mac build can only be made on a Mac); the cause is the same on every system |
 
 The release installer is `Hardware Shop Manager Setup 1.2.2.exe`, 123,874,859 bytes, SHA-256 `7129690CC370938FA4BB0C7FD17A70E23B3B20E94895DCD1EEEAC263DB9C2023`. The package check passed.
+
+## Version 1.2.3: newest item on top while billing, and a bill date (5 November 2026)
+
+While a bill is being made, the item added last is listed first; the saved invoice keeps the order the items were added in. A sale can be given an earlier date (never a future one); everything it records then belongs to that day, its number comes from that day's financial year, and the history keeps when it was really entered.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | No errors |
+| `npm test` | 285 passed (1 skipped, as above), including 3 new `sales` tests: a bill dated in the past has that date on the invoice, due date, stock movement, ledger entries and payment, is listed on its own day, prints with its date, and is recorded in the history with the time it was entered; a bill dated 31 March takes its number from the year that ended; a future or impossible date is refused and leaves nothing behind |
+| `npm run test:e2e` | 13 of 13 passed; `sales` now checks the newest item on top while billing and the added order on the saved invoice, a future date refused, a bill dated yesterday saved with that date, not counted in today's sales, and the next bill back at today |
+
+The release installer is `Hardware Shop Manager Setup 1.2.3.exe`, 123,875,320 bytes, SHA-256 `74A4C12B01558D4DA965B5A53BB8ECD3699E808461201BCE96E7E9181F1FACB0`. The package check passed.
+
+## Version 1.2.4: a date for payments received (5 November 2026)
+
+Receive payment (from an invoice, a customer or Payments & Outstanding) has a payment date: today unless changed, any earlier day, never a future one and never before the bill it is chosen to pay. The payment, its receipt number and its accounts belong to that day; the history keeps when it was entered.
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | No errors |
+| `npm test` | 286 passed (1 skipped, as above), including a new `sales` test: a future date and a date before the bill refused with nothing recorded; a payment dated the 18th has that date on the payment, its ledger entries and the invoice's payment list, keeps the real entry time, and is recorded in the history with its date |
+| `npm run test:e2e` | 13 of 13 passed; `sales` now checks the payment date starts at today and that a date before the bill is refused with the reason shown |
+
+The release installer is `Hardware Shop Manager Setup 1.2.4.exe`, 123,875,796 bytes, SHA-256 `CCAFE477F2F6679C9604985B4F815FDB88D3226288BE9F0D3C1FCFE9391A8546`. The package check passed.

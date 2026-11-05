@@ -103,6 +103,7 @@ function sale(
     notes: '',
     expectedGrandTotal: opts.expectedGrandTotal ?? bill.grandTotal,
     negativeStockReason: opts.negativeStockReason,
+    billDate: opts.billDate,
   });
 }
 
@@ -215,6 +216,56 @@ expect(accountBalance(env.db, 'ROUND_OFF')).toBe(-50);
   });
 });
 
+describe('a sale dated in the past', () => {
+  const dateOf = (sql: string, id: number | string) => (env.db.prepare(sql).all(id) as { business_date: string }[]).map((r) => r.business_date);
+
+  it('belongs to its bill date everywhere: invoice, stock, accounts and payments; the history keeps when it was entered', async () => {
+    // Today is 21 October 2026; the bill was written by hand on the 18th.
+    const c = customer('Paper Bill Customer');
+    const r = sale(c.id, [{ p: hammer, qty: 1000 }], { pay: [{ methodId: cash, amount: 20000 }], billDate: '2026-10-18' });
+    expect(r.invoiceNo).toBe('INV/2026-27/00001');
+    const i = inv(r.invoiceId);
+    expect(i).toMatchObject({ businessDate: '2026-10-18', dueDate: '2026-11-02', issuedAt: '2026-10-21T04:30:00.000Z' });
+    expect(dateOf("SELECT business_date FROM stock_movements WHERE ref_type = 'INVOICE' AND ref_id = ?", String(r.invoiceId))).toEqual(['2026-10-18']);
+    expect([...new Set(dateOf("SELECT business_date FROM ledger_entries WHERE ref_type = 'INVOICE' AND ref_id = ?", String(r.invoiceId)))]).toEqual(['2026-10-18']);
+    const paidOn = `SELECT p.business_date FROM payments p
+                    JOIN allocations a ON a.source_type = 'PAYMENT' AND a.source_id = p.id
+                    WHERE a.target_type = 'INVOICE' AND a.target_id = ?`;
+    expect(dateOf(paidOn, r.invoiceId)).toEqual(['2026-10-18']);
+
+    // It is found on its own day, not today.
+    expect(listInvoices(env.db, { status: 'ALL', from: '2026-10-18', to: '2026-10-18', page: 1, pageSize: 10 }, today()).total).toBe(1);
+    expect(listInvoices(env.db, { status: 'ALL', from: '2026-10-21', to: '2026-10-21', page: 1, pageSize: 10 }, today()).total).toBe(0);
+
+    const entry = listAudit(env.db, { page: 1, pageSize: 1, action: 'CREATE', entityType: 'invoice' }).rows[0]!;
+    expect(entry.occurredAt).toBe('2026-10-21T04:30:00.000Z');
+    expect(entry.after).toMatchObject({ billDate: '2026-10-18' });
+
+    const { renderDocument } = await import('@main/print/documents');
+    expect(renderDocument(env.db, 'INVOICE', r.invoiceId, 'A4', today()).html).toContain('Date: 18 Oct 2026');
+    healthy();
+  });
+
+  it('takes its number from the financial year of its date, and today needs no date', () => {
+    expect(sale(walkIn, [{ p: hammer, qty: 1000 }], { pay: [{ methodId: cash, amount: 45000 }] }).invoiceNo).toBe('INV/2026-27/00001');
+    const march = sale(walkIn, [{ p: hammer, qty: 1000 }], { pay: [{ methodId: cash, amount: 45000 }], billDate: '2026-03-31' });
+    expect(march.invoiceNo).toBe('INV/2025-26/00001');
+    const todays = sale(walkIn, [{ p: hammer, qty: 1000 }], { pay: [{ methodId: cash, amount: 45000 }], billDate: '2026-10-21' });
+    expect(todays.invoiceNo).toBe('INV/2026-27/00002');
+    expect(listAudit(env.db, { page: 1, pageSize: 1, action: 'CREATE', entityType: 'invoice' }).rows[0]!.after).not.toHaveProperty('billDate');
+    healthy();
+  });
+
+  it('is refused for a future or impossible date, leaving nothing behind', () => {
+    expect(() => sale(walkIn, [{ p: hammer, qty: 1000 }], { pay: [{ methodId: cash, amount: 45000 }], billDate: '2026-10-22' })).toThrow(
+      'A bill cannot be dated in the future.',
+    );
+    expect(() => sale(walkIn, [{ p: hammer, qty: 1000 }], { pay: [{ methodId: cash, amount: 45000 }], billDate: '2026-02-30' })).toThrow('Enter a valid date for the bill.');
+    expect(listInvoices(env.db, { status: 'ALL', page: 1, pageSize: 10 }, today()).total).toBe(0);
+    expect(getProduct(env.db, hammer.id, true).qty).toBe(20_000);
+  });
+});
+
 describe('discounts and tax', () => {
   it('applies discounts within the role limit and refuses larger ones', () => {
     const r = sale(walkIn, [{ p: hammer, qty: 2000, discount: { type: 'PERCENT', valueBp: 500 } }], {
@@ -323,6 +374,35 @@ describe('credit sales and payments', () => {
     expect(inv(r.invoiceId).status).toBe('UNPAID');
     expect(cust(c.id).balance).toBe(45000);
     expect(() => reversePayment(env, actor, { id: p.id, reason: 'Again' })).toThrow(/already been reversed/);
+    healthy();
+  });
+
+  it('records money received on an earlier day on that day, never before the bill it pays', () => {
+    // Today is 21 October; the bill is dated the 15th and the customer paid on the 18th.
+    const c = customer('Late Entry Customer');
+    const r = sale(c.id, [{ p: hammer, qty: 1000 }], { billDate: '2026-10-15' });
+    const pay = (paymentDate: string) =>
+      receivePayment(env, actor, {
+        requestId: randomUUID(),
+        customerId: c.id,
+        amount: 45000,
+        methodId: cash,
+        reference: '',
+        notes: '',
+        allocations: [{ docType: 'INVOICE', docId: r.invoiceId, amount: 45000 }],
+        paymentDate,
+      });
+    expect(() => pay('2026-10-22')).toThrow('A payment cannot be dated in the future.');
+    expect(() => pay('2026-10-14')).toThrow('INV/2026-27/00001 is dated 15 Oct 2026, so a payment for it cannot be dated earlier.');
+    expect(accountBalance(env.db, 'CASH')).toBe(0);
+
+    const p = pay('2026-10-18');
+    expect(p).toMatchObject({ businessDate: '2026-10-18', receivedAt: '2026-10-21T04:30:00.000Z', paymentNo: 'RCPT/2026-27/00001' });
+    expect(inv(r.invoiceId).settlements).toMatchObject([{ docNo: p.paymentNo, businessDate: '2026-10-18' }]);
+    const posted = env.db.prepare("SELECT DISTINCT business_date FROM ledger_entries WHERE ref_type = 'PAYMENT' AND ref_id = ?").all(String(p.id));
+    expect(posted).toEqual([{ business_date: '2026-10-18' }]);
+    expect(listAudit(env.db, { page: 1, pageSize: 1, action: 'PAYMENT_RECEIVED' }).rows[0]!.after).toMatchObject({ paymentDate: '2026-10-18' });
+    expect(inv(r.invoiceId).status).toBe('PAID');
     healthy();
   });
 

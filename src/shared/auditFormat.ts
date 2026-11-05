@@ -1,6 +1,6 @@
 import { formatMoney } from './money';
 import { formatQty } from './qty';
-import { formatDateTime } from './time';
+import { formatDate, formatDateTime } from './time';
 import { MOVEMENT_TYPES } from './stock';
 
 /** How recorded history is described to people: action names, field names, values and changes. */
@@ -134,6 +134,8 @@ const FIELD_LABELS: Record<string, string> = {
   countedAmount: 'Counted',
   differenceAmount: 'Difference',
   supplierInvoiceDate: 'Supplier bill date',
+  billDate: 'Bill dated',
+  paymentDate: 'Payment dated',
   ratesIncludeGst: 'Rates include GST',
   freightAmount: 'Freight / other charges',
   freightNote: 'What the charges are for',
@@ -188,6 +190,7 @@ const QTY_KEYS = /(qty|qtychange|^system|^counted|difference)$/i;
 export function formatFieldValue(key: string, value: unknown): string | null {
   const leaf = key.split('.').pop() ?? key;
   if (typeof value === 'string' && /At$/.test(leaf) && /^\d{4}-\d{2}-\d{2}T/.test(value)) return formatDateTime(value);
+  if (typeof value === 'string' && /Date$/.test(leaf) && /^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDate(value);
   if (typeof value !== 'number') return null;
   if (/Bp$/.test(leaf)) return `${value / 100}%`;
   if (leaf === 'movementId') return String(value);

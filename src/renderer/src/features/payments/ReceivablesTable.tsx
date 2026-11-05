@@ -121,7 +121,7 @@ export function ReceivablesTable({ customerId, initialFilter = 'ALL' }: { custom
         <ReceivePaymentDialog
           customerId={paying.customerId}
           customerName={paying.customerName}
-          preset={{ docType: paying.docType, docId: paying.docId, docNo: paying.docNo, outstanding: paying.outstanding }}
+          preset={{ docType: paying.docType, docId: paying.docId, docNo: paying.docNo, outstanding: paying.outstanding, businessDate: paying.businessDate }}
           onClose={() => setPaying(null)}
         />
       )}

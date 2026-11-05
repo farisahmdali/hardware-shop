@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { formatMoney } from '@shared/money';
-import { formatDate } from '@shared/time';
+import { businessDateOf, formatDate } from '@shared/time';
 import { errorMessage, useCommandMutation, useCommandQuery } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 import { Button } from '../../components/ui/button';
@@ -14,6 +14,8 @@ export interface PresetDoc {
   docId: number;
   docNo: string;
   outstanding: number;
+  /** The bill's date: a payment for it cannot be dated earlier. */
+  businessDate?: string;
 }
 
 const INVALIDATE = ['invoices.', 'customers.', 'receivables.', 'payments.'];
@@ -41,6 +43,14 @@ export function ReceivePaymentDialog({
   const [methodId, setMethodId] = useState<number | null>(null);
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
+  const today = businessDateOf(new Date());
+  const [paymentDate, setPaymentDate] = useState(today);
+  const dateProblem =
+    paymentDate > today
+      ? 'A payment cannot be dated in the future.'
+      : preset?.businessDate && paymentDate < preset.businessDate
+        ? `${preset.docNo} is dated ${formatDate(preset.businessDate)}, so a payment for it cannot be dated earlier.`
+        : null;
   const [error, setError] = useState<string | null>(null);
   const [requestId] = useState(newRequestId);
   const receive = useCommandMutation('payments.receive', { invalidate: INVALIDATE });
@@ -48,7 +58,7 @@ export function ReceivePaymentDialog({
   const excess = amount !== null ? amount - (preset ? preset.outstanding : totalOpen) : 0;
 
   const submit = async () => {
-    if (!amount || !method) return;
+    if (!amount || !method || !paymentDate || dateProblem) return;
     setError(null);
     try {
       const p = await receive.mutateAsync({
@@ -59,6 +69,7 @@ export function ReceivePaymentDialog({
         reference,
         notes,
         allocations: preset ? [{ docType: preset.docType, docId: preset.docId, amount: Math.min(amount, preset.outstanding) }] : [],
+        paymentDate: paymentDate === today ? undefined : paymentDate,
       });
       toast.success(`Payment ${p.paymentNo} recorded`, `${formatMoney(p.amount)} from ${customerName}`);
       onClose();
@@ -78,7 +89,7 @@ export function ReceivePaymentDialog({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={submit} busy={receive.isPending} disabled={!amount || !method}>
+          <Button onClick={submit} busy={receive.isPending} disabled={!amount || !method || !paymentDate || !!dateProblem}>
             Record payment
           </Button>
         </>
@@ -98,6 +109,13 @@ export function ReceivePaymentDialog({
               ))}
             </Select>
           )}
+        </Field>
+        <Field
+          label="Payment date"
+          error={dateProblem ?? undefined}
+          hint={!dateProblem && paymentDate < today ? `Counts on ${formatDate(paymentDate)} in cash and accounts.` : 'The day the money was received.'}
+        >
+          {(p) => <Input {...p} type="date" value={paymentDate} min={preset?.businessDate} max={today} onChange={(e) => setPaymentDate(e.target.value)} />}
         </Field>
         <Field label="Reference" hint="UPI transaction id, cheque number…">
           {(p) => <Input {...p} value={reference} onChange={(e) => setReference(e.target.value)} maxLength={60} />}

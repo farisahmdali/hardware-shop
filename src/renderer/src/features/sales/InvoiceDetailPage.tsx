@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Ban, Eye, FileDown, Printer, Undo2, Wallet } from 'lucide-react';
 import { formatMoney } from '@shared/money';
 import { formatQty } from '@shared/qty';
-import { formatDate, formatDateTime } from '@shared/time';
+import { businessDateOf, formatDate, formatDateTime, formatDocDate } from '@shared/time';
 import { stateName } from '@shared/gstStates';
 import { errorMessage, useCommandMutation, useCommandQuery } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -60,7 +60,14 @@ export function InvoiceDetailPage() {
                 {inv.kind === 'RENTAL' ? 'Rental bill' : 'Sold with a rental'} ·
               </Link>
             )}
-            {formatDateTime(inv.issuedAt)} by {inv.username ?? 'system'} ·{' '}
+            {businessDateOf(inv.issuedAt) === inv.businessDate ? (
+              formatDateTime(inv.issuedAt)
+            ) : (
+              <>
+                Dated <strong className="text-ink">{formatDate(inv.businessDate)}</strong>, entered {formatDateTime(inv.issuedAt)}
+              </>
+            )}{' '}
+            by {inv.username ?? 'system'} ·{' '}
             {inv.isWalkin ? (
               inv.customerName
             ) : (
@@ -232,7 +239,7 @@ export function InvoiceDetailPage() {
                         {s.docNo}
                         {s.reversed && <Badge className="ml-2">Reversed</Badge>}
                       </Td>
-                      <Td className="tabular">{formatDateTime(s.date)}</Td>
+                      <Td className="tabular">{formatDocDate(s.date, s.businessDate)}</Td>
                       <Td>{s.methodName ?? (s.kind === 'CREDIT_NOTE' ? 'Credit note' : 'Account credit')}</Td>
                       <Td align="right">{formatMoney(s.amount)}</Td>
                     </Tr>
@@ -294,7 +301,7 @@ export function InvoiceDetailPage() {
         <ReceivePaymentDialog
           customerId={inv.customerId}
           customerName={inv.customerName}
-          preset={{ docType: 'INVOICE', docId: inv.id, docNo: inv.invoiceNo, outstanding: inv.outstanding }}
+          preset={{ docType: 'INVOICE', docId: inv.id, docNo: inv.invoiceNo, outstanding: inv.outstanding, businessDate: inv.businessDate }}
           onClose={() => setPaying(false)}
         />
       )}

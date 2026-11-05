@@ -62,6 +62,7 @@ export function HeldBillsPage() {
         lines,
         billDiscount: h.cart.billDiscount,
         notes: h.cart.notes,
+        billDate: h.cart.billDate ?? null,
       });
       await remove.mutateAsync({ id: h.id });
       navigate('/sales');

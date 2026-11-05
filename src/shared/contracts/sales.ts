@@ -117,6 +117,8 @@ export interface SettlementRow {
   sourceId: number;
   docNo: string;
   date: string;
+  /** The day it belongs to; differs from `date` for a payment dated in the past. */
+  businessDate: string;
   methodName: string | null;
   amount: number;
   reversed: boolean;
@@ -218,6 +220,8 @@ export interface CartDraft {
   lines: { productId: number; qty: number; discount: DiscountInput }[];
   billDiscount: DiscountInput;
   notes: string;
+  /** The day of the sale, when it is not today. */
+  billDate?: string;
 }
 
 export interface HeldBillRow {
@@ -356,6 +360,8 @@ export const salesCommands = {
       expectedGrandTotal: paise,
       /** Set only when selling more than is in stock under an authorised override. */
       negativeStockReason: z.string().trim().max(500).optional(),
+      /** The day of the sale, when it is not today: any past day, never a future one. */
+      billDate: isoDate.optional(),
     }),
   ),
 
@@ -399,6 +405,8 @@ export const salesCommands = {
       allocations: z
         .array(z.object({ docType: z.enum(['INVOICE', 'ADJUSTMENT']), docId: id, amount: z.number().int().positive() }))
         .default([]),
+      /** The day the money was received, when it is not today: any past day, never a future one. */
+      paymentDate: isoDate.optional(),
     }),
   ),
   'payments.refund': command<PaymentRow>()(
@@ -448,6 +456,7 @@ export const salesCommands = {
         lines: z.array(z.object({ productId: id, qty: z.number().int().positive(), discount: discountSchema.default(null) })).max(300),
         billDiscount: discountSchema.default(null),
         notes: text(500),
+        billDate: isoDate.optional(),
       }),
     }),
   ),

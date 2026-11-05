@@ -62,6 +62,8 @@ export class Tx {
   readonly txnRef = randomUUID();
   readonly nowIso: string;
   readonly businessDate: string;
+  /** The records are dated on an earlier day than today. */
+  readonly backDated: boolean;
 
   constructor(
     readonly db: Db,
@@ -69,9 +71,13 @@ export class Tx {
     public actor: Actor,
     now: Date,
     timeZone: string,
+    /** The day the business records belong to, when it is not today (a bill dated in the past). */
+    businessDate?: string,
   ) {
     this.nowIso = now.toISOString();
-    this.businessDate = businessDateOf(now, timeZone);
+    const today = businessDateOf(now, timeZone);
+    this.businessDate = businessDate ?? today;
+    this.backDated = this.businessDate !== today;
   }
 
   audit(entry: AuditEntry): void {
@@ -162,12 +168,29 @@ export class Tx {
 }
 
 /**
- * Runs `fn` inside a BEGIN IMMEDIATE transaction. If `fn` throws, nothing it wrote
- * (including audit entries and document numbers) is kept.
+ * Checks the date given to something that happened on an earlier day (a bill written by hand,
+ * money received yesterday): a real date, never in the future. Returns undefined for today,
+ * ready for `transact`'s `businessDate`. `what` names it in the message: "A bill".
  */
-export function transact<T>(env: DbEnv, actor: Actor, fn: (tx: Tx) => T): T {
+export function pastBusinessDate(env: DbEnv, date: string | undefined, what: string): string | undefined {
+  if (!date) return undefined;
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+    throw new AppError(ErrorCodes.VALIDATION, `Enter a valid date for ${what.replace(/^A /, 'the ').toLowerCase()}.`);
+  }
+  const today = businessDateOf(env.clock.now(), env.timeZone ?? DEFAULT_TIMEZONE);
+  if (date > today) throw new AppError(ErrorCodes.VALIDATION, `${what} cannot be dated in the future.`);
+  return date === today ? undefined : date;
+}
+
+/**
+ * Runs `fn` inside a BEGIN IMMEDIATE transaction. If `fn` throws, nothing it wrote
+ * (including audit entries and document numbers) is kept. `businessDate` dates the records
+ * on another (past) day; the history still records when they were actually written.
+ */
+export function transact<T>(env: DbEnv, actor: Actor, fn: (tx: Tx) => T, opts: { businessDate?: string } = {}): T {
   const run = env.db.transaction(() => {
-    const tx = new Tx(env.db, actor, env.clock.now(), env.timeZone ?? DEFAULT_TIMEZONE);
+    const tx = new Tx(env.db, actor, env.clock.now(), env.timeZone ?? DEFAULT_TIMEZONE, opts.businessDate);
     const result = fn(tx);
     if (result && typeof (result as { then?: unknown }).then === 'function') {
       throw new Error('transact() callbacks must be synchronous');
